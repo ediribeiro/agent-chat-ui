@@ -20,6 +20,8 @@ import {
   PanelRightOpen,
   PanelRightClose,
   SquarePen,
+  Paperclip,
+  ArrowRight,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -28,6 +30,9 @@ import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
+import { FileUpload, FileInfo } from "./file-upload";
+import { createFileMessage } from "@/lib/file-utils";
+import { AppMessage, FileAttachment } from "@/types";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -78,6 +83,8 @@ export function Thread() {
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([]);
+  const [showFileUpload, setShowFileUpload] = useState(false);
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
@@ -129,34 +136,53 @@ export function Thread() {
     prevMessageLength.current = messages.length;
   }, [messages]);
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && selectedFiles.length === 0) || isLoading) return;
     setFirstTokenReceived(false);
 
-    const newHumanMessage: Message = {
-      id: uuidv4(),
-      type: "human",
-      content: input,
-    };
+    try {
+      const newHumanMessage: AppMessage = {
+        id: uuidv4(),
+        type: "human",
+        content: input,
+      };
 
-    const toolMessages = ensureToolCallsHaveResponses(stream.messages);
-    stream.submit(
-      { messages: [...toolMessages, newHumanMessage] },
-      {
-        streamMode: ["values"],
-        optimisticValues: (prev) => ({
-          ...prev,
-          messages: [
-            ...(prev.messages ?? []),
-            ...toolMessages,
-            newHumanMessage,
-          ],
-        }),
-      },
-    );
+      // If there are files attached, add file data to the message
+      if (selectedFiles.length > 0) {
+        // Create file attachments for message
+        const fileAttachments: FileAttachment[] = await Promise.all(
+          selectedFiles.map(async (fileInfo) => await createFileMessage(fileInfo))
+        );
 
-    setInput("");
+        // Add file attachments to message
+        newHumanMessage.files = fileAttachments;
+      }
+
+      const toolMessages = ensureToolCallsHaveResponses(stream.messages);
+      stream.submit(
+        { messages: [...toolMessages, newHumanMessage] },
+        {
+          streamMode: ["values"],
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [
+              ...(prev.messages ?? []),
+              ...toolMessages,
+              newHumanMessage,
+            ],
+          }),
+        }
+      );
+
+      // Reset files and input
+      setSelectedFiles([]);
+      setShowFileUpload(false);
+      setInput("");
+    } catch (error) {
+      console.error("Error sending message with files:", error);
+      toast.error("Failed to send message with files");
+    }
   };
 
   const handleRegenerate = (
@@ -169,6 +195,15 @@ export function Thread() {
       checkpoint: parentCheckpoint,
       streamMode: ["values"],
     });
+  };
+
+  // Handle file selection
+  const handleFilesSelected = (files: FileInfo[]) => {
+    setSelectedFiles(files);
+  };
+
+  const toggleFileUpload = () => {
+    setShowFileUpload((prev) => !prev);
   };
 
   const chatStarted = !!threadId || !!messages.length;
@@ -284,109 +319,119 @@ export function Thread() {
           </div>
         )}
 
-        <StickToBottom className="relative flex-1 overflow-hidden">
-          <StickyToBottomContent
-            className={cn(
-              "absolute inset-0 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
-              !chatStarted && "flex flex-col items-stretch mt-[25vh]",
-              chatStarted && "grid grid-rows-[1fr_auto]",
-            )}
-            contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
-            content={
-              <>
-                {messages
-                  .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                  .map((message, index) =>
-                    message.type === "human" ? (
-                      <HumanMessage
-                        key={message.id || `${message.type}-${index}`}
-                        message={message}
-                        isLoading={isLoading}
-                      />
-                    ) : (
-                      <AssistantMessage
-                        key={message.id || `${message.type}-${index}`}
-                        message={message}
-                        isLoading={isLoading}
-                        handleRegenerate={handleRegenerate}
-                      />
-                    ),
+        <div className="flex-1 overflow-y-auto pb-5">
+          <StickToBottom>
+            <StickyToBottomContent
+              content={
+                <>
+                  {messages
+                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
+                    .map((message, index) =>
+                      message.type === "human" ? (
+                        <HumanMessage
+                          key={message.id || `${message.type}-${index}`}
+                          message={message}
+                          isLoading={isLoading}
+                        />
+                      ) : (
+                        <AssistantMessage
+                          key={message.id || `${message.type}-${index}`}
+                          message={message}
+                          isLoading={isLoading}
+                          handleRegenerate={handleRegenerate}
+                        />
+                      ),
+                    )}
+                  {isLoading && !firstTokenReceived && (
+                    <AssistantMessageLoading />
                   )}
-                {isLoading && !firstTokenReceived && (
-                  <AssistantMessageLoading />
-                )}
-              </>
-            }
-            footer={
-              <div className="sticky flex flex-col items-center gap-8 bottom-0 px-4 bg-white">
-                {!chatStarted && (
-                  <div className="flex gap-3 items-center">
-                    <LangGraphLogoSVG className="flex-shrink-0 h-8" />
-                    <h1 className="text-2xl font-semibold tracking-tight">
-                      Agent Chat
-                    </h1>
-                  </div>
-                )}
-
-                <ScrollToBottom className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 animate-in fade-in-0 zoom-in-95" />
-
-                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10">
+                </>
+              }
+              contentClassName="py-0 pb-2"
+              footer={
+                <>
+                  <ScrollToBottom className="sticky bottom-20 left-1/2 -translate-x-1/2 z-10" />
+                  
                   <form
                     onSubmit={handleSubmit}
-                    className="grid grid-rows-[1fr_auto] gap-2 max-w-3xl mx-auto"
+                    className="flex flex-col gap-3 p-4 sticky bottom-0 border-t bg-background max-w-3xl mx-auto w-full"
                   >
-                    <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey && !e.metaKey) {
-                          e.preventDefault();
-                          const el = e.target as HTMLElement | undefined;
-                          const form = el?.closest("form");
-                          form?.requestSubmit();
-                        }
-                      }}
-                      placeholder="Type your message..."
-                      className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none"
-                    />
-
-                    <div className="flex items-center justify-between p-2 pt-4">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="render-tool-calls"
-                            checked={hideToolCalls ?? false}
-                            onCheckedChange={setHideToolCalls}
+                    <div className="flex flex-col gap-3 w-full">
+                      {showFileUpload && (
+                        <FileUpload
+                          onFilesSelected={handleFilesSelected}
+                          className="mb-2"
+                        />
+                      )}
+                      <div className="flex gap-2 items-end">
+                        <div className="flex-1 relative">
+                          <textarea
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSubmit(e);
+                              }
+                            }}
+                            placeholder="Send a message..."
+                            className="w-full min-h-[40px] max-h-[320px] resize-none px-3 py-2 rounded-md border border-input bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            rows={Math.min(Math.max(1, input.split("\n").length), 7)}
                           />
-                          <Label
-                            htmlFor="render-tool-calls"
-                            className="text-sm text-gray-600"
-                          >
-                            Hide Tool Calls
-                          </Label>
+                          <div className="absolute right-2 bottom-2">
+                            <button
+                              type="button"
+                              onClick={toggleFileUpload}
+                              className={cn(
+                                "p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors",
+                                selectedFiles.length > 0 && "text-primary"
+                              )}
+                              title="Attach files"
+                            >
+                              <Paperclip className="size-4" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      {stream.isLoading ? (
-                        <Button key="stop" onClick={() => stream.stop()}>
-                          <LoaderCircle className="w-4 h-4 animate-spin" />
-                          Cancel
-                        </Button>
-                      ) : (
                         <Button
                           type="submit"
-                          className="transition-all shadow-md"
-                          disabled={isLoading || !input.trim()}
+                          disabled={(!input.trim() && selectedFiles.length === 0) || isLoading}
+                          size="icon"
+                          className="shrink-0"
                         >
-                          Send
+                          {isLoading ? (
+                            <LoaderCircle className="animate-spin" />
+                          ) : (
+                            <ArrowRight />
+                          )}
+                          <span className="sr-only">Send</span>
                         </Button>
+                      </div>
+                      {selectedFiles.length > 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          {selectedFiles.length} file(s) attached
+                        </div>
                       )}
+                      
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="render-tool-calls"
+                          checked={hideToolCalls ?? false}
+                          onCheckedChange={setHideToolCalls}
+                        />
+                        <Label
+                          htmlFor="render-tool-calls"
+                          className="text-sm text-gray-600"
+                        >
+                          Hide Tool Calls
+                        </Label>
+                      </div>
                     </div>
                   </form>
-                </div>
-              </div>
-            }
-          />
-        </StickToBottom>
+                </>
+              }
+            />
+          </StickToBottom>
+        </div>
       </motion.div>
     </div>
   );
