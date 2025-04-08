@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EventSource Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 8px 12px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        #logContainer {
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        .timestamp {
+            color: #888;
+            margin-right: 10px;
+        }
+        .level {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .info { color: blue; }
+        .warning { color: orange; }
+        .error { color: red; }
+        .system { color: green; }
+        .module {
+            color: purple;
+            font-style: italic;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>EventSource Logs Test</h1>
+    
+    <div class="controls">
+        <button id="connectBtn">Connect to Logs</button>
+        <button id="disconnectBtn">Disconnect</button>
+        <button id="clearBtn">Clear Logs</button>
+        <button id="testLogsBtn">Generate Test Logs</button>
+        <button id="healthBtn">Test Health</button>
+    </div>
+    
+    <div id="status">Status: Disconnected</div>
+    
+    <h3>Log Messages:</h3>
+    <div id="logContainer"></div>
+    
+    <script>
+        let eventSource = null;
+        const logContainer = document.getElementById('logContainer');
+        const statusEl = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const testLogsBtn = document.getElementById('testLogsBtn');
+        const healthBtn = document.getElementById('healthBtn');
+        
+        // Connect to logs endpoint
+        connectBtn.addEventListener('click', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            statusEl.textContent = 'Status: Connecting...';
+            addLogEntry({
+                type: 'system',
+                message: 'Connecting to logs stream...',
+                timestamp: new Date().toISOString()
+            });
+            
+            try {
+                eventSource = new EventSource('http://localhost:3000/logs');
+                
+                eventSource.onopen = () => {
+                    statusEl.textContent = 'Status: Connected';
+                    addLogEntry({
+                        type: 'system',
+                        message: 'Connected to logs stream',
+                        timestamp: new Date().toISOString()
+                    });
+                };
+                
+                eventSource.onmessage = (event) => {
+                    console.log('Raw event data:', event.data);
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('Parsed data:', data);
+                        addLogEntry(data);
+                    } catch (error) {
+                        console.error('Error parsing message:', error);
+                        addLogEntry({
+                            type: 'error',
+                            level: 'ERROR',
+                            message: `Error parsing message: ${event.data}`,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                };
+                
+                eventSource.onerror = (error) => {
+                    console.error('EventSource error:', error);
+                    statusEl.textContent = 'Status: Error - See console';
+                    addLogEntry({
+                        type: 'system',
+                        level: 'ERROR',
+                        message: 'EventSource connection error. See console for details.',
+                        timestamp: new Date().toISOString()
+                    });
+                };
+            } catch (error) {
+                console.error('Error creating EventSource:', error);
+                statusEl.textContent = 'Status: Failed to connect';
+                addLogEntry({
+                    type: 'system',
+                    level: 'ERROR',
+                    message: `Failed to create EventSource: ${error.message}`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+        
+        // Disconnect
+        disconnectBtn.addEventListener('click', () => {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+                statusEl.textContent = 'Status: Disconnected';
+                addLogEntry({
+                    type: 'system',
+                    message: 'Disconnected from logs stream',
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+        
+        // Clear logs
+        clearBtn.addEventListener('click', () => {
+            logContainer.innerHTML = '';
+            addLogEntry({
+                type: 'system',
+                message: 'Logs cleared',
+                timestamp: new Date().toISOString()
+            });
+        });
+        
+        // Generate test logs
+        testLogsBtn.addEventListener('click', async () => {
+            try {
+                addLogEntry({
+                    type: 'system',
+                    message: 'Requesting test logs generation...',
+                    timestamp: new Date().toISOString()
+                });
+                
+                const response = await fetch('http://localhost:3000/test-logs');
+                const data = await response.json();
+                
+                addLogEntry({
+                    type: 'system',
+                    message: `Test logs response: ${JSON.stringify(data)}`,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('Error generating test logs:', error);
+                addLogEntry({
+                    type: 'system',
+                    level: 'ERROR',
+                    message: `Failed to generate test logs: ${error.message}`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+        
+        // Test health
+        healthBtn.addEventListener('click', async () => {
+            try {
+                addLogEntry({
+                    type: 'system',
+                    message: 'Testing server health...',
+                    timestamp: new Date().toISOString()
+                });
+                
+                const response = await fetch('http://localhost:3000/health');
+                const data = await response.json();
+                
+                addLogEntry({
+                    type: 'system',
+                    message: `Health check response: ${JSON.stringify(data)}`,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('Error checking health:', error);
+                addLogEntry({
+                    type: 'system',
+                    level: 'ERROR',
+                    message: `Health check failed: ${error.message}`,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+        
+        // Add log entry
+        function addLogEntry(entry) {
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            const timestamp = document.createElement('span');
+            timestamp.className = 'timestamp';
+            timestamp.textContent = new Date(entry.timestamp).toLocaleTimeString();
+            logEntry.appendChild(timestamp);
+            
+            const level = document.createElement('span');
+            level.className = `level ${entry.level?.toLowerCase() || entry.type}`;
+            level.textContent = entry.type === 'log' ? `[${entry.level}]` : '[SYSTEM]';
+            logEntry.appendChild(level);
+            
+            if (entry.module) {
+                const module = document.createElement('span');
+                module.className = 'module';
+                module.textContent = entry.module;
+                logEntry.appendChild(module);
+            }
+            
+            const message = document.createElement('span');
+            message.className = 'message';
+            message.textContent = entry.message;
+            logEntry.appendChild(message);
+            
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+    </script>
+</body>
+</html> 

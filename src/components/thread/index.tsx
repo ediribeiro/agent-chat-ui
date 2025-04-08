@@ -1,15 +1,14 @@
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef } from "react";
+import { useEffect, useRef, useState, ComponentType } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
-import { useState, FormEvent } from "react";
+import { FormEvent } from "react";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import {
-  DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
 import { LangGraphLogoSVG } from "../icons/langgraph";
@@ -20,6 +19,8 @@ import {
   PanelRightOpen,
   PanelRightClose,
   SquarePen,
+  TerminalSquare,
+  ArrowUp,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -28,25 +29,57 @@ import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
+import { FileUpload } from "@/components/FileUpload";
+import LogStream from "@/components/LogStream";
+import { Textarea } from "@/components/ui/textarea";
 
-function StickyToBottomContent(props: {
-  content: ReactNode;
-  footer?: ReactNode;
-  className?: string;
-  contentClassName?: string;
+// Re-import custom UI components needed for StateDrivenUIComponents
+import InputFile from "./messages/input-file";
+import RiskAnalysis from "./messages/risk-analysis";
+import ProtectionMeasuresTable from "./messages/protection-measures-table";
+
+// Re-define registry needed for StateDrivenUIComponents
+const componentRegistry: Record<string, ComponentType<any>> = {
+  "input-file.tsx": InputFile,
+  "risk-analysis.tsx": RiskAnalysis,
+  "protection-measures-table.tsx": ProtectionMeasuresTable,
+};
+
+// Define StateDrivenUIComponents here as it was removed from ai.tsx
+function StateDrivenUIComponents({
+  thread,
+}: {
+  thread: ReturnType<typeof useStreamContext>;
 }) {
-  const context = useStickToBottomContext();
-  return (
-    <div
-      ref={context.scrollRef}
-      style={{ width: "100%", height: "100%" }}
-      className={props.className}
-    >
-      <div ref={context.contentRef} className={props.contentClassName}>
-        {props.content}
-      </div>
+  const { values } = thread;
+  const uiElementsToRender = values?.ui_elements;
 
-      {props.footer}
+  if (!uiElementsToRender || uiElementsToRender.length === 0) {
+    return null;
+  }
+
+  return (
+    // Add some margin/padding
+    <div className="mb-4">
+      {uiElementsToRender.map((uiElement) => {
+        const ComponentToRender = componentRegistry[uiElement.component];
+
+        if (!ComponentToRender) {
+          console.error(`Component not found in registry: ${uiElement.component}`);
+          return (
+            <div key={uiElement.id} className="text-red-500 p-2 border border-red-500 rounded">
+              Error: Component "{uiElement.component}" not found.
+            </div>
+          );
+        }
+
+        return (
+          <ComponentToRender
+            key={uiElement.id}
+            {...uiElement.props}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -58,13 +91,32 @@ function ScrollToBottom(props: { className?: string }) {
   return (
     <Button
       variant="outline"
-      className={props.className}
+      size="sm"
+      className={cn(
+        "absolute bottom-20 left-1/2 -translate-x-1/2 z-10",
+        "animate-in fade-in-0 zoom-in-95",
+        props.className,
+      )}
       onClick={() => scrollToBottom()}
     >
-      <ArrowDown className="w-4 h-4" />
+      <ArrowDown className="w-4 h-4 mr-1" />
       <span>Scroll to bottom</span>
     </Button>
   );
+}
+
+// Helper function to compare message arrays (needed again)
+function areStreamedMessagesVisuallyEqual(arr1: Message[] | null | undefined, arr2: Message[] | null | undefined): boolean {
+  if (!arr1 || !arr2) return arr1 === arr2; // Both null/undefined is equal
+  if (arr1.length !== arr2.length) return false;
+  for (let i = 0; i < arr1.length; i++) {
+    // Simple check based on ID and stringified content
+    // Added checks for null/undefined elements
+    if (!arr1[i] || !arr2[i] || arr1[i].id !== arr2[i].id || JSON.stringify(arr1[i].content) !== JSON.stringify(arr2[i].content)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function Thread() {
@@ -77,13 +129,30 @@ export function Thread() {
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
   );
+  const [showLogs, setShowLogs] = useState(false);
   const [input, setInput] = useState("");
-  const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+  const [useMockLogs, setUseMockLogs] = useState(false);
+
+  // Reintroduce displayMessages state for frontend accumulation
+  const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
 
   const stream = useStreamContext();
-  const messages = stream.messages;
+  const streamValues = stream.values;
+  const streamedMessages = stream.messages; // Source stream for updates
   const isLoading = stream.isLoading;
+
+  useEffect(() => {
+    if (stream.values && Object.keys(stream.values).length > 0) {
+      console.log(">>> Stream Values Updated:", stream.values);
+    }
+  }, [stream.values]);
+
+  useEffect(() => {
+    if (stream.messages && stream.messages.length > 0) {
+        console.log(">>> Stream Messages Updated:", stream.messages);
+    }
+  }, [stream.messages]);
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -95,11 +164,9 @@ export function Thread() {
     try {
       const message = (stream.error as any).message;
       if (!message || lastError.current === message) {
-        // Message has already been logged. do not modify ref, return early.
         return;
       }
 
-      // Message is defined, and it has not been logged yet. Save it, and send the error
       lastError.current = message;
       toast.error("An error occurred. Please try again.", {
         description: (
@@ -115,24 +182,44 @@ export function Thread() {
     }
   }, [stream.error]);
 
-  // TODO: this should be part of the useStream hook
-  const prevMessageLength = useRef(0);
+  // useEffect for frontend accumulation based on stream.messages
   useEffect(() => {
-    if (
-      messages.length !== prevMessageLength.current &&
-      messages?.length &&
-      messages[messages.length - 1].type === "ai"
-    ) {
-      setFirstTokenReceived(true);
-    }
+    // Only proceed if streamedMessages is a valid array (even if empty)
+    if (Array.isArray(streamedMessages)) {
+      setDisplayMessages(prevDisplayMessages => {
+        // Build the potential new list by merging
+        const newMessagesMap = new Map<string, Message>();
+        // 1. Populate map with previous messages from our state
+        prevDisplayMessages.forEach(msg => msg.id && newMessagesMap.set(msg.id, msg));
 
-    prevMessageLength.current = messages.length;
-  }, [messages]);
+        // 2. Merge/update with incoming messages from the SDK stream
+        streamedMessages.forEach(newMsg => {
+          if (!newMsg?.id) return; // Skip messages without ID
+          // Add or Replace in the map. Assumes incoming message has the latest content for that ID.
+          newMessagesMap.set(newMsg.id, newMsg);
+        });
+
+        // 3. Convert map back to array
+        const nextDisplayMessages = Array.from(newMessagesMap.values());
+
+        // 4. Compare with previous state to prevent unnecessary updates/loops
+        if (areStreamedMessagesVisuallyEqual(nextDisplayMessages, prevDisplayMessages)) {
+          // No visual change detected
+          return prevDisplayMessages;
+        }
+
+        // 5. Update state if changed
+        console.log("Updating displayMessages with frontend accumulation from stream.messages.");
+        return nextDisplayMessages;
+      });
+    }
+    // If streamedMessages is null/undefined, do nothing, preserving displayMessages
+
+  }, [streamedMessages]); // Depend on the SDK's message stream
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
-    setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
       id: uuidv4(),
@@ -140,19 +227,17 @@ export function Thread() {
       content: input,
     };
 
-    const toolMessages = ensureToolCallsHaveResponses(stream.messages);
+    // Optimistic UI update to our local state
+    setDisplayMessages(prev => [...prev, newHumanMessage]);
+
+    // Prepare messages for submission using the *updated* local state
+    const messagesForSubmit = [...displayMessages, newHumanMessage];
+    const toolMessages = ensureToolCallsHaveResponses(messagesForSubmit);
+
     stream.submit(
-      { messages: [...toolMessages, newHumanMessage] },
+      { messages: toolMessages },
       {
-        streamMode: ["values"],
-        optimisticValues: (prev) => ({
-          ...prev,
-          messages: [
-            ...(prev.messages ?? []),
-            ...toolMessages,
-            newHumanMessage,
-          ],
-        }),
+        streamMode: ["messages", "values"], // Keep requesting both streams
       },
     );
 
@@ -162,22 +247,39 @@ export function Thread() {
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
-    // Do this so the loading state is correct
-    prevMessageLength.current = prevMessageLength.current - 1;
-    setFirstTokenReceived(false);
+    let lastAiIndex = -1;
+    // Find the index in our local displayMessages
+    for(let i = displayMessages.length - 1; i >= 0; i--) {
+        if (displayMessages[i].type === 'ai') {
+            lastAiIndex = i;
+            break;
+        }
+    }
+    // Optimistically slice our local displayMessages state
+    setDisplayMessages(prev => prev.slice(0, lastAiIndex >= 0 ? lastAiIndex : 0));
+
+    // Submit with checkpoint
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
-      streamMode: ["values"],
+      streamMode: ["messages", "values"], // Keep requesting both streams
     });
   };
 
-  const chatStarted = !!threadId || !!messages.length;
+  // Update chatStarted to check our local displayMessages length
+  const chatStarted = !!threadId || displayMessages.length > 0 || (streamValues?.ui_elements && streamValues.ui_elements.length > 0);
+
+  const mainContentMarginLeft = chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0;
+  const mainContentWidth = chatHistoryOpen
+    ? isLargeScreen
+      ? "calc(100% - 300px)"
+      : "100%"
+    : "100%";
 
   return (
     <div className="flex w-full h-screen overflow-hidden">
       <div className="relative lg:flex hidden">
         <motion.div
-          className="absolute h-full border-r bg-white overflow-hidden z-20"
+          className="absolute h-full border-r bg-white overflow-hidden z-30"
           style={{ width: 300 }}
           animate={
             isLargeScreen
@@ -197,18 +299,11 @@ export function Thread() {
         </motion.div>
       </div>
       <motion.div
-        className={cn(
-          "flex-1 flex flex-col min-w-0 overflow-hidden relative",
-          !chatStarted && "grid-rows-[1fr]",
-        )}
+        className="flex flex-col flex-1 h-screen relative"
         layout={isLargeScreen}
-        animate={{
-          marginLeft: chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0,
-          width: chatHistoryOpen
-            ? isLargeScreen
-              ? "calc(100% - 300px)"
-              : "100%"
-            : "100%",
+        style={{
+          marginLeft: mainContentMarginLeft,
+          width: mainContentWidth,
         }}
         transition={
           isLargeScreen
@@ -216,11 +311,16 @@ export function Thread() {
             : { duration: 0 }
         }
       >
-        {!chatStarted && (
-          <div className="absolute top-0 left-0 w-full flex items-center justify-between gap-3 p-2 pl-4 z-10">
+        <div
+          className={cn(
+            "flex items-center justify-between p-2 border-b bg-background z-20",
+            !chatStarted && "absolute top-0 left-0 right-0",
+            chatStarted && "relative",
+          )}
+        >
+          <div className="flex items-center justify-start gap-2 flex-1">
             {(!chatHistoryOpen || !isLargeScreen) && (
               <Button
-                className="hover:bg-gray-100"
                 variant="ghost"
                 onClick={() => setChatHistoryOpen((p) => !p)}
               >
@@ -231,162 +331,192 @@ export function Thread() {
                 )}
               </Button>
             )}
-          </div>
-        )}
-        {chatStarted && (
-          <div className="flex items-center justify-between gap-3 p-2 pl-4 z-10 relative">
-            <div className="flex items-center justify-start gap-2 relative">
-              <div className="absolute left-0 z-10">
-                {(!chatHistoryOpen || !isLargeScreen) && (
-                  <Button
-                    className="hover:bg-gray-100"
-                    variant="ghost"
-                    onClick={() => setChatHistoryOpen((p) => !p)}
-                  >
-                    {chatHistoryOpen ? (
-                      <PanelRightOpen className="size-5" />
-                    ) : (
-                      <PanelRightClose className="size-5" />
-                    )}
-                  </Button>
-                )}
-              </div>
-              <motion.button
+            {chatStarted && (
+              <button
                 className="flex gap-2 items-center cursor-pointer"
                 onClick={() => setThreadId(null)}
-                animate={{
-                  marginLeft: !chatHistoryOpen ? 48 : 0,
-                }}
-                transition={{
-                  type: "spring",
-                  stiffness: 300,
-                  damping: 30,
-                }}
               >
                 <LangGraphLogoSVG width={32} height={32} />
                 <span className="text-xl font-semibold tracking-tight">
                   Agent Chat
                 </span>
-              </motion.button>
-            </div>
+              </button>
+            )}
+          </div>
 
+          {chatStarted && (
             <TooltipIconButton
-              size="lg"
-              className="p-4"
               tooltip="New thread"
               variant="ghost"
               onClick={() => setThreadId(null)}
             >
               <SquarePen className="size-5" />
             </TooltipIconButton>
+          )}
+        </div>
 
-            <div className="absolute inset-x-0 top-full h-5 bg-gradient-to-b from-background to-background/0" />
+        <div className="flex-1 overflow-y-auto relative">
+          <StickToBottom>
+            <div className="p-4 space-y-0">
+              {!chatStarted ? (
+                <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
+                  <div className="max-w-md w-full text-center">
+                    <h2 className="text-2xl font-semibold mb-2">
+                      Risk Analysis Chatbot
+                    </h2>
+                    <p className="text-muted-foreground mb-6">
+                      Upload a PDF document to start the risk analysis process
+                    </p>
+                    <FileUpload />
+                    <div className="mt-12">
+                      <LangGraphLogoSVG className="flex-shrink-0 h-8 mx-auto mb-2" />
+                      <h1 className="text-2xl font-semibold tracking-tight">
+                        Agent Chat
+                      </h1>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Render StateDrivenUIComponents FIRST */}
+                  <StateDrivenUIComponents thread={stream} />
+
+                  {/* Then render the message history */}
+                  {displayMessages.map((message, index) => {
+                      if (message.type === "human") {
+                        return (
+                          <HumanMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                          />
+                        );
+                      } else {
+                        return (
+                          <AssistantMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                            handleRegenerate={handleRegenerate}
+                          />
+                        );
+                      }
+                    })}
+
+                  {isLoading && <AssistantMessageLoading />}
+                </>
+              )}
+
+              {showLogs && chatStarted && (
+                <div className="w-full max-w-3xl mx-auto mt-4 mb-4">
+                   <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-medium text-gray-700">Supplementary Logs</h3>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2"
+                        onClick={() => setShowLogs(false)}
+                      >
+                        Hide
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex items-center mb-2">
+                    <Switch
+                      id="use-mock-logs"
+                      checked={useMockLogs}
+                      onCheckedChange={setUseMockLogs}
+                    />
+                    <Label
+                      htmlFor="use-mock-logs"
+                      className="text-xs text-gray-600 ml-2"
+                    >
+                      Use Mock Logs (for testing when server is unavailable)
+                    </Label>
+                  </div>
+                  <LogStream className="h-[400px]" />
+                </div>
+              )}
+            </div>
+            <ScrollToBottom />
+          </StickToBottom>
+        </div>
+
+        {chatStarted && (
+          <div className="p-4 border-t bg-background z-10">
+             <div className="max-w-3xl mx-auto">
+              <form
+                onSubmit={handleSubmit}
+                className="relative"
+              >
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.metaKey) {
+                      e.preventDefault();
+                      const el = e.target as HTMLElement | undefined;
+                      const form = el?.closest("form");
+                      form?.requestSubmit();
+                    }
+                  }}
+                  placeholder="Type your message..."
+                  className="pr-16 resize-none min-h-12"
+                  rows={1}
+                />
+                <div className="absolute bottom-2 right-2 flex items-center">
+                  {stream.isLoading ? (
+                      <Button key="stop" size="icon" className="rounded-full" onClick={() => stream.stop()}>
+                          <LoaderCircle className="w-4 h-4 animate-spin" />
+                          <span className="sr-only">Cancel</span>
+                      </Button>
+                  ) : (
+                      <Button
+                          type="submit"
+                          size="icon"
+                          className="rounded-full transition-all shadow-md"
+                          disabled={isLoading || !input.trim()}
+                      >
+                          <ArrowUp className="w-4 h-4" />
+                          <span className="sr-only">Send</span>
+                      </Button>
+                  )}
+                </div>
+              </form>
+              <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="render-tool-calls"
+                      checked={hideToolCalls ?? false}
+                      onCheckedChange={setHideToolCalls}
+                    />
+                    <Label
+                      htmlFor="render-tool-calls"
+                      className="text-xs text-gray-600"
+                    >
+                      Hide Tool Calls
+                    </Label>
+                  </div>
+
+                  {!showLogs && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-gray-600 flex items-center gap-1"
+                      onClick={() => setShowLogs(true)}
+                    >
+                      <TerminalSquare className="w-3 h-3" />
+                      Show Logs
+                    </Button>
+                  )}
+                </div>
+                <div></div>
+              </div>
+            </div>
           </div>
         )}
-
-        <StickToBottom className="relative flex-1 overflow-hidden">
-          <StickyToBottomContent
-            className={cn(
-              "absolute inset-0 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
-              !chatStarted && "flex flex-col items-stretch mt-[25vh]",
-              chatStarted && "grid grid-rows-[1fr_auto]",
-            )}
-            contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
-            content={
-              <>
-                {messages
-                  .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                  .map((message, index) =>
-                    message.type === "human" ? (
-                      <HumanMessage
-                        key={message.id || `${message.type}-${index}`}
-                        message={message}
-                        isLoading={isLoading}
-                      />
-                    ) : (
-                      <AssistantMessage
-                        key={message.id || `${message.type}-${index}`}
-                        message={message}
-                        isLoading={isLoading}
-                        handleRegenerate={handleRegenerate}
-                      />
-                    ),
-                  )}
-                {isLoading && !firstTokenReceived && (
-                  <AssistantMessageLoading />
-                )}
-              </>
-            }
-            footer={
-              <div className="sticky flex flex-col items-center gap-8 bottom-0 px-4 bg-white">
-                {!chatStarted && (
-                  <div className="flex gap-3 items-center">
-                    <LangGraphLogoSVG className="flex-shrink-0 h-8" />
-                    <h1 className="text-2xl font-semibold tracking-tight">
-                      Agent Chat
-                    </h1>
-                  </div>
-                )}
-
-                <ScrollToBottom className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 animate-in fade-in-0 zoom-in-95" />
-
-                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10">
-                  <form
-                    onSubmit={handleSubmit}
-                    className="grid grid-rows-[1fr_auto] gap-2 max-w-3xl mx-auto"
-                  >
-                    <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey && !e.metaKey) {
-                          e.preventDefault();
-                          const el = e.target as HTMLElement | undefined;
-                          const form = el?.closest("form");
-                          form?.requestSubmit();
-                        }
-                      }}
-                      placeholder="Type your message..."
-                      className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none"
-                    />
-
-                    <div className="flex items-center justify-between p-2 pt-4">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="render-tool-calls"
-                            checked={hideToolCalls ?? false}
-                            onCheckedChange={setHideToolCalls}
-                          />
-                          <Label
-                            htmlFor="render-tool-calls"
-                            className="text-sm text-gray-600"
-                          >
-                            Hide Tool Calls
-                          </Label>
-                        </div>
-                      </div>
-                      {stream.isLoading ? (
-                        <Button key="stop" onClick={() => stream.stop()}>
-                          <LoaderCircle className="w-4 h-4 animate-spin" />
-                          Cancel
-                        </Button>
-                      ) : (
-                        <Button
-                          type="submit"
-                          className="transition-all shadow-md"
-                          disabled={isLoading || !input.trim()}
-                        >
-                          Send
-                        </Button>
-                      )}
-                    </div>
-                  </form>
-                </div>
-              </div>
-            }
-          />
-        </StickToBottom>
       </motion.div>
     </div>
   );
