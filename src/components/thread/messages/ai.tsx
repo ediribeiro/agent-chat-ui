@@ -12,6 +12,7 @@ import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
+import { MessageSquareText, Wrench } from "lucide-react";
 
 // Import Accordion components
 import {
@@ -21,46 +22,57 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 
-// Helper function to generate preview text
-function getPreviewText(message: Message, anthropicStreamedToolCalls?: AIMessage['tool_calls']): string {
+// Helper function to generate preview text and determine icon
+function getPreviewInfo(message: Message, anthropicStreamedToolCalls?: AIMessage['tool_calls']): { text: string; icon: React.ElementType } {
     const contentString = getContentString(message.content);
-    const maxLen = 80;
+    const maxLen = 90;
+    let text = "";
+    let icon: React.ElementType = MessageSquareText; // Default to thought bubble
 
-    // Preview for Tool Result messages
+    // Tool Result messages
     if (message.type === "tool") {
         const toolOutputPreview = contentString.substring(0, maxLen);
-        // Tool messages might have a `name` field indicating which call they are result for.
-        const toolName = (message as any).name || 'Result'; // Attempt to get name
+        const toolName = (message as any).name || 'Result';
         const preview = toolOutputPreview.length > 0 ? toolOutputPreview : '(No textual output)';
-        return `Tool Result [${toolName}]: ${preview}${contentString.length > maxLen ? '...' : ''}`;
+        text = `Tool Result [${toolName}]: ${preview}${contentString.length > maxLen ? '...' : ''}`;
+        icon = Wrench; // Use tool icon
+    }
+    // AIMessages with text content
+    else if (contentString.length > 0) {
+        text = contentString.substring(0, maxLen) + (contentString.length > maxLen ? '...' : '');
+        icon = MessageSquareText; // Use thought bubble
+    }
+    // Standard tool calls (only if contentString is empty)
+    else {
+        const stdToolCalls = (message as AIMessage).tool_calls;
+        if (stdToolCalls && stdToolCalls.length > 0) {
+            const firstName = stdToolCalls[0].name;
+            const count = stdToolCalls.length;
+            text = `Tool Call: ${firstName}${count > 1 ? ` (+${count - 1} more)` : ''}`;
+            icon = Wrench; // Use tool icon
+        }
+        // Anthropic style streamed tool calls (only if contentString is empty)
+        else {
+             const anthropicCalls = anthropicStreamedToolCalls;
+             if (anthropicCalls && anthropicCalls.length > 0) {
+                 const firstName = anthropicCalls[0].name;
+                 const count = anthropicCalls.length;
+                 text = `Tool Call: ${firstName}${count > 1 ? ` (+${count - 1} more)` : ''}`;
+                 icon = Wrench; // Use tool icon
+             }
+             // Fallback for AI message with no text/tools
+             else if (message.type === "ai") {
+                text = "Agent Processing...";
+                // Keep default icon (MessageSquareText)
+             }
+             else {
+                text = "Step Details"; // Generic fallback
+                // Keep default icon
+             }
+        }
     }
 
-    // Preview for AIMessages with text content
-    if (contentString.length > 0) {
-        return contentString.substring(0, maxLen) + (contentString.length > maxLen ? '...' : '');
-    }
-
-    // Check standard tool calls (only if contentString is empty)
-    const stdToolCalls = (message as AIMessage).tool_calls;
-    if (stdToolCalls && stdToolCalls.length > 0) {
-        const firstName = stdToolCalls[0].name;
-        const count = stdToolCalls.length;
-        return `Tool Call: ${firstName}${count > 1 ? ` (+${count - 1} more)` : ''}`;
-    }
-
-    // Check Anthropic style streamed tool calls (only if contentString is empty)
-    if (anthropicStreamedToolCalls && anthropicStreamedToolCalls.length > 0) {
-        const firstName = anthropicStreamedToolCalls[0].name;
-        const count = anthropicStreamedToolCalls.length;
-        return `Tool Call: ${firstName}${count > 1 ? ` (+${count - 1} more)` : ''}`;
-    }
-
-    // Fallback for AI message with no text/tools
-    if (message.type === "ai") {
-         return "Agent Processing...";
-    }
-
-    return "Step Details"; // Generic fallback
+    return { text, icon };
 }
 
 function parseAnthropicStreamedToolCalls(
@@ -93,6 +105,7 @@ export function AssistantMessage({
   handleRegenerate,
 }: {
   message: Message;
+  messageIndex: number;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
@@ -133,13 +146,17 @@ export function AssistantMessage({
   // Heuristic: it's the last message AND the overall stream is loading
   const isPotentiallyStreaming = isLastMessage && isOverallLoading;
 
-  // Generate preview text
-  const previewText = getPreviewText(message, anthropicStreamedToolCalls);
+  // Generate preview text and icon
+  const { text: previewText, icon: PreviewIcon } = getPreviewInfo(message, anthropicStreamedToolCalls);
 
   // Auto-scroll the streaming box
   useEffect(() => {
     if (streamingBoxRef.current) {
-      streamingBoxRef.current.scrollTop = streamingBoxRef.current.scrollHeight;
+      // Use scroll() with smooth behavior
+      streamingBoxRef.current.scroll({
+        top: streamingBoxRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
   }, [contentString]); // Scroll when content changes
 
@@ -171,13 +188,19 @@ export function AssistantMessage({
       >
           <AccordionItem value={message.id || 'message-item'} className="border-b-0">
             <AccordionTrigger className="py-2 hover:no-underline font-medium text-sm text-left">
-              <span className="pr-2">{previewText}</span>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                 <PreviewIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                 <span className="flex-1 relative overflow-hidden whitespace-nowrap">
+                     {previewText}
+                     <div className="absolute inset-y-0 right-0 w-60 bg-gradient-to-l from-background via-background/80 to-transparent pointer-events-none"></div>
+                 </span>
+              </div>
             </AccordionTrigger>
 
             {showStreamingBox && (
                 <div
                     ref={streamingBoxRef}
-                    className="text-xs text-muted-foreground p-3 border rounded-md mt-1 max-h-28 overflow-y-auto bg-background"
+                    className="text-xs text-muted-foreground p-3 border rounded-md mt-1 max-h-28 overflow-y-auto bg-background scrollbar-hide"
                 >
                     <MarkdownText>{contentString}</MarkdownText>
                 </div>

@@ -26,3 +26,14 @@ dist-ssr
 # LangGraph API
 .langgraph_api
 .env
+
+# Added by Claude Task Master
+dev-debug.log
+# Dependency directories
+node_modules/
+# Environment variables
+.vscode
+# OS specific
+# Task files
+tasks.json
+tasks/ 

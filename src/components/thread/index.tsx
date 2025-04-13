@@ -395,6 +395,7 @@ export function Thread() {
                         return (
                           <AssistantMessage
                             key={message.id || `${message.type}-${index}`}
+                            messageIndex={index}
                             message={message}
                             isLoading={isLoading}
                             handleRegenerate={handleRegenerate}

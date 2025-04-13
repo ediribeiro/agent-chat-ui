@@ -358,9 +358,9 @@ const LogStream: React.FC<LogStreamProps> = ({ className = '' }) => {
             {logs.length === 0 ? "No logs available yet..." : "No logs match the current filters..."}
           </div>
         ) : (
-          filteredLogs.map((log) => (
+          filteredLogs.map((log, index) => (
             <div 
-              key={log.id} 
+              key={`log-${index}-${log.id || log.timestamp}`}
               className="mb-1 break-words whitespace-pre-wrap"
             >
               <span className="text-gray-500 mr-1.5">

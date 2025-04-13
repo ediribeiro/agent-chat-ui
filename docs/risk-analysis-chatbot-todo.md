@@ -33,20 +33,20 @@
 
 ## Phase 2: State-Driven Accumulated Display
 
-- [ ] **Implement Backend State for UI Elements (Python)**
-  - **Why:** To reliably track and accumulate the UI elements (thoughts, state updates) that need to be displayed sequentially on the frontend, using LangGraph's standard state management instead of potentially problematic custom event yielding.
+- [X] **Implement Backend State for UI Elements (Python)**
+  - **Why:** To reliably track and accumulate the UI elements (messages, state updates) that need to be displayed sequentially on the frontend, using LangGraph's standard state management instead of potentially problematic custom event yielding.
   - **Where:** In your `src/assistant/state.py` (or where `State` TypedDict is defined) and `src/assistant/graph.py` (node functions and graph definition).
   - **How:**
     1.  **Define State Key:** Add a new key to your `State` TypedDict, e.g., `ui_elements: Annotated[list | None, append_ui_elements]`. Initialize it as `None` or `[]`.
     2.  **Create Appending Reducer:** Define a Python function `append_ui_elements(left: list | None, right: list | None) -> list:` that takes two lists (or None) and returns a *new* list containing all elements from both (similar to how `add_messages` works). Ensure it handles None inputs gracefully.
     3.  **Register Reducer:** When creating your `StateGraph`, associate the `ui_elements` key with your `append_ui_elements` reducer function.
     4.  **Modify Nodes:**
-        - Inside your node functions, determine if you need to display a "Thought" or "Key State Update".
+        - Inside your node functions, determine if you need to display a "messages" or "Key State Update".
         - Construct the standard UI dictionary: `ui_payload = {"id": f"unique-id-{uuid.uuid4()}", "component": "path/to/component.tsx", "props": {...}}`.
         - **Instead of `yield ui_payload`**, `return` it as part of the node's output dictionary under the `ui_elements` key: `return {"ui_elements": [ui_payload]}`. The reducer will append this list to the state.
         - Return other state updates as usual (e.g., `return {"risk_analysis": ..., "ui_elements": [risk_payload]}`).
 
-- [ ] **Implement Frontend Components for Display (State & Thoughts)**
+- [X] **Implement Frontend Components for Display (State & Thoughts)**
   - **Why:** Create visual representations for both key state updates (formatted data) and intermediate thoughts (expandable boxes).
   - **Where:** `src/components/thread/messages/` directory.
   - **How:**
@@ -54,7 +54,7 @@
     - **Thoughts Component:** Create `thoughts-box.tsx`. Use Shadcn `Accordion` or similar for expand/collapse. Style subtly.
     - Ensure components handle props and render correctly.
 
-- [ ] **Implement Frontend Rendering Logic (`LoadExternalComponent` from State)**
+- [X] **Implement Frontend Rendering Logic (`LoadExternalComponent` from State)**
   - **Why:** To display all custom UI components sequentially based on the accumulated `ui_elements` list received in the main state snapshot (`stream.values`).
   - **Where:** Review rendering loop in `src/components/thread/index.tsx` and component usage in `src/components/thread/messages/ai.tsx`.
   - **How:**
@@ -74,7 +74,7 @@
     5.  **Placement:** Decide where to render this block of UI elements. Rendering them after the *last* AI message (as currently implemented in `ai.tsx` with `shouldRenderUI`) is a reasonable starting point.
     6.  Ensure CSS allows vertical growth for accumulation.
 
-- [ ] **Test Accumulated Streaming via State**
+- [X] **Test Accumulated Streaming via State**
   - **Goal:** Verify that the UI correctly accumulates and displays *both* intermediate thoughts (expandable boxes) *and* key state updates (formatted directly) by reading the `ui_elements` list from the state snapshot.
   - Upload a PDF.
   - Observe the chat space throughout the workflow.
@@ -84,8 +84,9 @@
     - Formatted state update components (`risk-analysis`, etc.) appear.
     - Outputs from previous agent steps remain visible as new elements are added from the `ui_elements` list in the state.
     - UI is responsive and sequence logical.
+    - **Status:** Completed. The UI now correctly renders state-driven components (`InputFile`, `RiskAnalysis`, etc.) from `stream.values.ui_elements` at the top, and accumulates/displays the message history (acting as thoughts/steps) using accordions below.
 
-- [ ] **Debug State-Driven Display Issues**
+- [X] **Debug State-Driven Display Issues**
   - If accumulation fails or components render incorrectly:
     - Check backend: Verify the `append_ui_elements` reducer is correctly registered and working (log its inputs/outputs). Ensure nodes return UI dictionaries under the correct key (`ui_elements`). Ensure IDs are unique.
     - Check Console (Frontend): Inspect `stream.values`. Does the `ui_elements` key exist? Does it contain the expected list of dictionaries? Is it growing correctly on subsequent updates?
@@ -95,37 +96,66 @@
 
 ## Phase 3: Output Formatting (Final Table)
 
-- [ ] **Stream Final Output via State**
+- [X] **Stream Final Output via State**
   - In the final backend node, capture `protection_measures_list`.
   - Return a state update including the UI dictionary for the `RiskTable.tsx` component under the `ui_elements` key. `return {"ui_elements": [final_table_payload]}`.
 
-- [ ] **Create Table Component (`RiskTable.tsx`)**
+- [X] **Create Table Component (`RiskTable.tsx`)**
   - Create the component to render `protection_measures_list`.
   - Triggered when its dictionary appears in `stream.values.ui_elements`.
 
-- [ ] **Style the Table**
+- [X] **Style the Table**
   - Apply styling.
 
-- [ ] **Test Final Table Rendering**
+- [X] **Test Final Table Rendering**
   - Run a full workflow and verify the `RiskTable` component appears correctly at the end, rendered from the state data.
 
 ---
 
 ## Phase 4: Download Functionality
 
-- [ ] **Implement /download endpoint**
-  - Add GET endpoint in `server.py`.
-  - Generate Word doc.
+- [ ] **Backend: Refactor Document Generation (`utils.py`)**
+  - [ ] **Action:** Create a new function `generate_risk_doc_stream(risk_data: list) -> io.BytesIO` based on the existing `generate_risk_doc`.
+  - [ ] **Details:** Modify the function to use `io.BytesIO()` to create an in-memory stream, save the `python-docx` document to this stream (`document.save(file_stream)`), rewind the stream (`file_stream.seek(0)`), and return the stream object.
+  - [ ] **Cleanup:** Remove the call to the old `generate_risk_doc` (that saves locally) from the `create_protection_measures` graph node if no longer needed.
 
-- [ ] **Add Download Button**
-  - Add button within `RiskTable.tsx`.
-  - Trigger fetch.
+- [ ] **Backend: Implement Download Endpoint (LangGraph Server - Port 2024)**
+  - [ ] **Action:** Add a GET endpoint (e.g., `/api/download`) to the application serving your LangGraph instance.
+  - [ ] **Parameter:** Accept `thread_id: str` as a required query parameter.
+  - [ ] **Logic: Data Retrieval:**
+    - [ ] Access the configured LangGraph checkpoint store (e.g., database).
+    - [ ] Fetch the latest state/checkpoint `values` for the given `thread_id`.
+    - [ ] Extract the `protection_measures_list` from `values` (e.g., `values.get('protection_measures_list')`).
+    - [ ] Handle errors if thread or data not found (return 404).
+  - [ ] **Logic: Document Generation:**
+    - [ ] Call the new `generate_risk_doc_stream()` function with the retrieved `protection_measures_list`.
+    - [ ] Handle errors during generation (return 500).
+  - [ ] **Logic: Response:**
+    - [ ] Return a `StreamingResponse` using the generated `BytesIO` stream.
+    - [ ] Set `media_type` to `'application/vnd.openxmlformats-officedocument.wordprocessingml.document'`.
+    - [ ] Set `Content-Disposition` header to `attachment; filename="risk_analysis_{filename}_{timestamp}.docx"`.
 
-- [ ] **Handle File Download**
-  - Use response blob.
+- [ ] **Frontend: Implement Download Button Click Handler (`protection-measures-table.tsx`)**
+  - [ ] **Action:** Implement the `handleDownload` async function triggered by the existing button.
+  - [ ] **Logic:**
+    - [ ] Check if `threadId` prop is available.
+    - [ ] Construct the fetch URL pointing to the **LangGraph server endpoint** (e.g., `http://localhost:2024/api/download?threadId=...`).
+    - [ ] Perform the `fetch` GET request.
+    - [ ] Check `response.ok` and handle backend errors (show alert/toast).
+    - [ ] Get filename from `Content-Disposition` header or use a default.
+    - [ ] Convert `response.blob()`.
+    - [ ] Create temporary `<a>` link, set `href` to `URL.createObjectURL(blob)`, set `download` attribute.
+    - [ ] Simulate click.
+    - [ ] Clean up link and object URL.
+    - [ ] Add `try...catch` for fetch/blob errors.
 
-- [ ] **Test Download**
-  - Verify Word doc.
+- [ ] **Frontend: Verify `threadId` Prop (`protection-measures-table.tsx` & Parent)**
+  - [ ] **Action:** Ensure the `ProtectionMeasuresTable` component correctly receives the active `threadId` as a prop from its parent component (likely `StateDrivenUIComponents` in `Thread.tsx`).
+
+- [ ] **Test Download Functionality**
+  - [ ] **Action:** Run the full workflow, select a completed thread, click the download button.
+  - [ ] **Verify:** Browser prompts download, filename is correct, downloaded `.docx` file opens and contains the expected risk analysis data matching the UI.
+  - [ ] **Test Errors:** Check behaviour for invalid thread IDs or simulated backend failures.
 
 ---
 

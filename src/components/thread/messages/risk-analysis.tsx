@@ -1,7 +1,6 @@
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -19,7 +18,7 @@ import { AlertTriangle } from "lucide-react";
 interface RiskSummaryItem {
   Id: string;
   Risco: string;
-  Relacionado_ao?: string; // Added optional field based on doc function
+  "Relacionado ao"?: string; // Changed to match JSON key with space (quoted)
   Probabilidade: number;
   "Impacto Geral": number; // Use quotes if key has spaces
   "Nível de Risco": string;
@@ -45,44 +44,45 @@ export default function RiskAnalysis({ analysis_data }: RiskAnalysisProps) { // 
         <AlertTriangle className="w-4 h-4 text-orange-500" />
         Risk Analysis Summary
       </h3>
-      <Table className="border rounded-lg">
-        <TableCaption>Summary of identified risks.</TableCaption>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[60px]">Id</TableHead>
-            <TableHead>Risk</TableHead>
-            <TableHead>Related To</TableHead>
-            <TableHead className="text-center">Probability (P)</TableHead>
-            <TableHead className="text-center">Impact (I)</TableHead>
-            <TableHead className="text-center">Risk Level</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {analysis_data.map((risk) => (
-            <TableRow key={risk.Id}>
-              <TableCell className="font-medium">{risk.Id}</TableCell>
-              <TableCell className="text-xs">{risk.Risco}</TableCell>
-              <TableCell className="text-xs">{risk.Relacionado_ao ?? "N/A"}</TableCell>
-              <TableCell className="text-center text-xs">
-                {convertProbabilidade(risk.Probabilidade)}
-              </TableCell>
-              <TableCell className="text-center text-xs">
-                {convertImpacto(risk["Impacto Geral"])}
-              </TableCell>
-              <TableCell className="text-center text-xs font-medium">
-                <span
-                  className={cn(
-                    "px-2 py-0.5 rounded-full",
-                    getRiskColorClass(risk["Nível de Risco"])
-                  )}
-                >
-                  {risk["Nível de Risco"]}
-                </span>
-              </TableCell>
+      <div className="border rounded-lg overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[60px]">Id</TableHead>
+              <TableHead>Risco</TableHead>
+              <TableHead>Categoria</TableHead>
+              <TableHead className="text-center">Probabilidade (P)</TableHead>
+              <TableHead className="text-center">Impacto (I)</TableHead>
+              <TableHead className="text-center">Nível de Risco</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {analysis_data.map((risk) => (
+              <TableRow key={risk.Id}>
+                <TableCell className="font-medium">{risk.Id}</TableCell>
+                <TableCell className="text-xs whitespace-normal break-words">{risk.Risco}</TableCell>
+                <TableCell className="text-xs whitespace-normal break-words text-center">{risk['Relacionado ao'] ?? "N/A"}</TableCell>
+                <TableCell className="text-center text-xs">
+                  {convertProbabilidade(risk.Probabilidade)}
+                </TableCell>
+                <TableCell className="text-center text-xs">
+                  {convertImpacto(risk["Impacto Geral"])}
+                </TableCell>
+                <TableCell className="text-center text-xs font-medium">
+                  <span
+                    className={cn(
+                      "px-2 py-0.5 rounded-full",
+                      getRiskColorClass(risk["Nível de Risco"])
+                    )}
+                  >
+                    {risk["Nível de Risco"]}
+                  </span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 } 

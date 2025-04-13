@@ -23,11 +23,11 @@ export function convertImpacto(impacto: number | undefined | null): string {
   if (impacto === undefined || impacto === null) return "N/A";
   try {
     const impactoValue = Math.round(Number(impacto));
-    if (1 <= impactoValue && impactoValue <= 3) return "Muito Baixo";
-    if (4 <= impactoValue && impactoValue <= 6) return "Baixo";
-    if (7 <= impactoValue && impactoValue <= 9) return "Médio";
-    if (10 <= impactoValue && impactoValue <= 12) return "Alto";
-    if (13 <= impactoValue && impactoValue <= 15) return "Muito Alto";
+    if (1 <= impactoValue && impactoValue <= 4) return "Muito Baixo";
+    if (4 < impactoValue && impactoValue <= 7) return "Baixo";
+    if (7 < impactoValue && impactoValue <= 10) return "Médio";
+    if (10 < impactoValue && impactoValue <= 13) return "Alto";
+    if (13 < impactoValue && impactoValue <= 15) return "Muito Alto";
     return "Inválido";
   } catch {
     return "Inválido";

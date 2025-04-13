@@ -3,7 +3,6 @@ import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useEffect } from "react";
 
-import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import {
   Sheet,
@@ -14,6 +13,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PanelRightOpen, PanelRightClose } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+
+// Helper to format date (can be replaced with a library like date-fns if needed)
+function formatThreadTimestamp(isoTimestamp: string): string {
+    try {
+        const date = new Date(isoTimestamp);
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + 
+               date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch (e) {
+        console.error("Failed to format timestamp:", isoTimestamp, e);
+        return "";
+    }
+}
 
 function ThreadList({
   threads,
@@ -27,17 +38,12 @@ function ThreadList({
   return (
     <div className="h-full flex flex-col w-full gap-2 items-start justify-start overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
-        let itemText = t.thread_id;
-        if (
-          typeof t.values === "object" &&
-          t.values &&
-          "messages" in t.values &&
-          Array.isArray(t.values.messages) &&
-          t.values.messages?.length > 0
-        ) {
-          const firstMessage = t.values.messages[0];
-          itemText = getContentString(firstMessage.content);
-        }
+        // --- Revised logic for itemText ---
+        const filename = (t.values as any)?.filename || "Untitled Analysis"; // Get filename from values, provide fallback
+        const timestamp = t.created_at ? formatThreadTimestamp(t.created_at) : ""; // Format timestamp
+        const itemText = timestamp ? `${filename} - ${timestamp}` : filename; // Combine, handling missing timestamp
+        // --- End of revised logic ---
+
         return (
           <div key={t.thread_id} className="w-full px-1">
             <Button

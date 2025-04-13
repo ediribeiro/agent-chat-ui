@@ -3,7 +3,7 @@
  */
 
 // LangGraph server URL (for the main API)
-export const LANGGRAPH_API_URL = import.meta.env.VITE_LANGGRAPH_API_URL || 'http://localhost:2024';
+export const LANGGRAPH_API_URL = import.meta.env.VITE_LANGGRAPH_API_URL || 'http://localhost:8123';
 
 // Supplementary logs server URL
 export const LOGS_SERVER_URL = import.meta.env.VITE_LOGS_SERVER_URL || 'http://localhost:3000';
