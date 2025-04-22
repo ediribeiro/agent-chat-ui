@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { cn, convertImpacto, convertProbabilidade, getRiskColorClass } from "@/lib/utils";
+import { FILE_UPLOAD_URL } from "@/lib/config";
 
 // Updated interface based on protection_measures_list structure
 interface MeasureItem {
@@ -33,7 +34,6 @@ interface MeasureItem {
   "Ações Preventivas"?: Array<{ Descrição: string; Responsável: string }>;
   "Ações de Contingência"?: Array<{ Descrição: string; Responsável: string }>;
   "Nível de Risco": string; // Needed for color coding
-  // Add other fields if needed
 }
 
 interface ProtectionMeasuresProps {
@@ -99,8 +99,8 @@ export default function ProtectionMeasuresTable({
       const filename = threadId
         ? `risk_analysis_${threadId}.docx`
         : "risk_analysis.docx";
-      // !!! IMPORTANT: Replace with your actual API endpoint !!!
-      const downloadUrl = `/api/download?threadId=${threadId || ''}`; 
+      // Download endpoint using configured upload server and consistent param naming
+      const downloadUrl = `${FILE_UPLOAD_URL}/api/download?thread_id=${threadId || ''}`;
 
       const response = await fetch(downloadUrl);
       if (!response.ok) {

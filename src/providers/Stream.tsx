@@ -176,7 +176,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="apiUrl"
                 name="apiUrl"
                 className="bg-background"
-                defaultValue={apiUrl ?? "http://localhost:2024"}
+                defaultValue={apiUrl ?? "http://localhost:8123"}
                 required
               />
             </div>
@@ -194,7 +194,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="assistantId"
                 name="assistantId"
                 className="bg-background"
-                defaultValue={assistantId ?? "agent"}
+                defaultValue={assistantId ?? "report_content"}
                 required
               />
             </div>

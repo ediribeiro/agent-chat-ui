@@ -9,7 +9,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB in bytes
 // Use URLs from config
 const UPLOAD_URL = FILE_UPLOAD_URL + '/upload';
 const HEALTH_CHECK_URL = LOGS_SERVER_URL + '/health';
-// Note: LangGraph API remains on port 2024, handled by StreamProvider
+// Note: LangGraph API remains on port 8123, handled by StreamProvider
 
 export const FileUpload = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -96,12 +96,12 @@ export const FileUpload = () => {
         });
         if (!healthCheck.ok) {
           console.error('Health check failed:', await healthCheck.text());
-          throw new Error('File upload server is not available. Please ensure the server is running on port 3000.');
+          throw new Error('File upload server is not available. Please ensure the server is running on port 8001.');
         }
         console.log('Server health check passed');
       } catch (error) {
         console.error('Server connection error:', error);
-        throw new Error('Cannot connect to the file upload server. Please ensure the server is running on port 3000.');
+        throw new Error('Cannot connect to the file upload server. Please ensure the server is running on port 8001.');
       }
 
       console.log('Uploading file to:', UPLOAD_URL);
@@ -200,7 +200,7 @@ export const FileUpload = () => {
             <p className="text-xs text-gray-500">or click to browse</p>
             <p className="text-xs text-gray-400">Maximum file size: 5MB</p>
             <p className="text-xs text-gray-400 mt-4">
-              This will upload to the file server (port 3000) and process with LangGraph (port 2024)
+              This will upload to the file server (port 8001) and process with LangGraph (port 8123)
             </p>
           </div>
         )}

@@ -6,10 +6,10 @@
 export const LANGGRAPH_API_URL = import.meta.env.VITE_LANGGRAPH_API_URL || 'http://localhost:8123';
 
 // Supplementary logs server URL
-export const LOGS_SERVER_URL = import.meta.env.VITE_LOGS_SERVER_URL || 'http://localhost:3000';
+export const LOGS_SERVER_URL = import.meta.env.VITE_LOGS_SERVER_URL || 'http://localhost:8001';
 
 // File upload server URL (typically the same as logs server)
-export const FILE_UPLOAD_URL = import.meta.env.VITE_FILE_UPLOAD_URL || 'http://localhost:3000';
+export const FILE_UPLOAD_URL = import.meta.env.VITE_FILE_UPLOAD_URL || 'http://localhost:8001';
 
 /**
  * Helper function to get the appropriate URL based on environment

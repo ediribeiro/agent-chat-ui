@@ -52,6 +52,7 @@ function StateDrivenUIComponents({
   thread: ReturnType<typeof useStreamContext>;
 }) {
   const { values } = thread;
+  const [threadId] = useQueryState("threadId");
   const uiElementsToRender = values?.ui_elements;
 
   if (!uiElementsToRender || uiElementsToRender.length === 0) {
@@ -73,11 +74,12 @@ function StateDrivenUIComponents({
           );
         }
 
+        const elementProps =
+          uiElement.component === "protection-measures-table.tsx"
+            ? { ...uiElement.props, threadId }
+            : uiElement.props;
         return (
-          <ComponentToRender
-            key={uiElement.id}
-            {...uiElement.props}
-          />
+          <ComponentToRender key={uiElement.id} {...elementProps} />
         );
       })}
     </div>
