@@ -7,10 +7,7 @@ import React, {
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
-import {
-  type UIMessage,
-  type RemoveUIMessage,
-} from "@langchain/langgraph-sdk/react-ui";
+import { type UIMessage } from "@langchain/langgraph-sdk/react-ui";
 import { useQueryState } from "nuqs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -26,21 +23,114 @@ export type StateType = {
   messages: Message[]; 
   ui?: UIMessage[];
   ui_elements?: Array<{id: string; component: string; props: Record<string, any>}>;
+  assistant_id?: string; // Added for interrupt/resume
+  checkpoint?: any; // Added for interrupt/resume
 };
 
-const useTypedStream = useStream<
-  StateType,
-  {
-    UpdateType: {
-      messages?: Message[] | Message | string;
-      ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
-      ui_elements?: Array<{id: string; component: string; props: Record<string, any>}>;
-    };
-  }
->;
+// Use any type to avoid strict typing errors with the SDK
+// This is a simpler approach than trying to match the exact return type
+type StreamContextType = any;
 
-type StreamContextType = ReturnType<typeof useTypedStream>;
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
+
+// Add custom event listener for run-created events that come from our resumeWorkflow function
+function useRunCreatedEvent() {
+  useEffect(() => {
+    const handleRunCreated = (event: CustomEvent) => {
+      console.log('🔍 DEBUG [Stream] run-created event detected:', event.detail);
+    };
+    
+    window.addEventListener('run-created', handleRunCreated as EventListener);
+    
+    return () => {
+      window.removeEventListener('run-created', handleRunCreated as EventListener);
+    };
+  }, []);
+}
+
+// Add custom event listener for UI element updates
+function useUIElementsUpdatedEvent() {
+  useEffect(() => {
+    const handleUIElementsUpdated = (event: CustomEvent) => {
+      console.log('🔍 DEBUG [Stream] ui-elements-updated event detected:', event.detail);
+    };
+    
+    window.addEventListener('ui-elements-updated', handleUIElementsUpdated as EventListener);
+    
+    return () => {
+      window.removeEventListener('ui-elements-updated', handleUIElementsUpdated as EventListener);
+    };
+  }, []);
+}
+
+// Add stream sync listener to ensure the SDK stream state stays in sync
+// with our manual stream implementation in resumeWorkflow
+function useStreamSyncEvent() {
+  useEffect(() => {
+    const handleStreamSync = (event: CustomEvent) => {
+      console.log('🔍 DEBUG [Stream] stream-sync event detected:', event.detail);
+      
+      // Force an update to the stream context if needed
+      // We could call streamValue.update() here if streamValue is accessible
+      
+      // Dispatch a secondary event that components can listen for
+      window.dispatchEvent(new CustomEvent('stream-state-updated', {
+        detail: {
+          ...event.detail,
+          timestamp: Date.now()
+        }
+      }));
+    };
+    
+    window.addEventListener('stream-sync', handleStreamSync as EventListener);
+    
+    return () => {
+      window.removeEventListener('stream-sync', handleStreamSync as EventListener);
+    };
+  }, []);
+}
+
+// Add custom event listener for stream-messages-updated events
+function useStreamMessagesEvent(messagesUpdater: (messages: any[]) => void) {
+  useEffect(() => {
+    const handleStreamMessages = (event: CustomEvent) => {
+      console.log('🔍 DEBUG [Stream] stream-messages-updated event received:', event.detail);
+      
+      // Update the messages in the stream context
+      if (event.detail?.messages && Array.isArray(event.detail.messages)) {
+        messagesUpdater(event.detail.messages);
+      }
+    };
+    
+    window.addEventListener('stream-messages-updated', handleStreamMessages as EventListener);
+    
+    return () => {
+      window.removeEventListener('stream-messages-updated', handleStreamMessages as EventListener);
+    };
+  }, [messagesUpdater]);
+}
+
+// Add custom event listener for ui-elements-updated events
+function useUIElementsEvent(valuesUpdater: (values: any) => void) {
+  useEffect(() => {
+    const handleUIElements = (event: CustomEvent) => {
+      console.log('🔍 DEBUG [Stream] ui-elements-updated event received:', event.detail);
+      
+      // Update the UI elements in the stream context values
+      if (event.detail?.uiElements) {
+        valuesUpdater({
+          ui_elements: event.detail.uiElements
+        });
+      }
+    };
+    
+    window.addEventListener('ui-elements-updated', handleUIElements as EventListener);
+    
+    return () => {
+      window.removeEventListener('ui-elements-updated', handleUIElements as EventListener);
+    };
+  }, [valuesUpdater]);
+}
 
 async function sleep(ms = 4000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -79,16 +169,244 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
-  const streamValue = useTypedStream({
-    apiUrl,
-    apiKey: apiKey ?? undefined,
-    assistantId,
-    threadId: threadId ?? null,
-    onThreadId: (id) => {
-      setThreadId(id);
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
-    },
-  });
+  
+  // Track network requests for streaming
+  useEffect(() => {
+    // Create a proxy for the native fetch to monitor SSE connections
+    const originalFetch = window.fetch;
+    window.fetch = function monitoredFetch(input: RequestInfo | URL, init?: RequestInit) {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method || 'GET';
+      
+      // Only log streaming-related requests
+      if (url.includes('/stream') || url.includes('/runs/') || 
+          (init?.headers && JSON.stringify(init.headers).includes('text/event-stream'))) {
+        
+        console.log(`🔌 NETWORK [${method}] Streaming request to: ${url}`, {
+          headers: init?.headers,
+          body: init?.body ? JSON.parse(init.body as string) : undefined
+        });
+        
+        // Return the original fetch but also log the response
+        return originalFetch(input, init).then(response => {
+          console.log(`🔌 NETWORK [${response.status}] Response from: ${url}`, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries()),
+            // We can't directly log the body as it's a stream
+            isStream: response.headers.get('content-type')?.includes('text/event-stream')
+          });
+          
+          // If this is an SSE stream, monitor it
+          if (response.headers.get('content-type')?.includes('text/event-stream')) {
+            console.log('🔌 NETWORK Event stream detected - events will be logged');
+            
+            // Create a new ReadableStream to clone the response body
+            const originalBody = response.body;
+            if (originalBody) {
+              // Use a TransformStream to monitor chunks without consuming them
+              const monitorStream = new TransformStream({
+                transform(chunk, controller) {
+                  // Log the chunk data (with some formatting)
+                  const text = new TextDecoder().decode(chunk);
+                  const events = text.split('\n\n').filter(e => e.trim());
+                  
+                  for (const event of events) {
+                    if (event.trim()) {
+                      try {
+                        // Parse and log each event
+                        const lines = event.split('\n');
+                        const eventType = lines.find(l => l.startsWith('event:'))?.substring(6).trim();
+                        const data = lines.find(l => l.startsWith('data:'))?.substring(5).trim();
+                        
+                        console.log(`🔌 NETWORK SSE Event [${eventType || 'message'}]:`, 
+                          data ? JSON.parse(data) : '(no data)');
+                      } catch (e) {
+                        console.log(`🔌 NETWORK SSE Raw Event:`, event);
+                      }
+                    }
+                  }
+                  
+                  // Pass the chunk through unchanged
+                  controller.enqueue(chunk);
+                }
+              });
+
+              // Create a new response with the monitored body
+              const clonedResponse = new Response(
+                originalBody.pipeThrough(monitorStream),
+                {
+                  headers: response.headers,
+                  status: response.status,
+                  statusText: response.statusText
+                }
+              );
+              
+              return clonedResponse;
+            }
+          }
+          
+          return response;
+        }).catch(error => {
+          console.error(`🔌 NETWORK Error for ${url}:`, error);
+          throw error;
+        });
+      }
+      
+      // For non-streaming requests, just use the original fetch
+      return originalFetch(input, init);
+    };
+    
+    // Cleanup function to restore original fetch
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [apiUrl]); // Only recreate if the API URL changes
+  
+  // Enable run-created and ui-elements-updated event listeners
+  useRunCreatedEvent();
+  useUIElementsUpdatedEvent();
+  useStreamSyncEvent();
+  
+  // Call the useStream hook directly instead of through useTypedStream
+  // Create a try/catch block to handle potential initialization errors
+  let streamValue: any = { 
+    isLoading: false, 
+    error: null, 
+    messages: [], 
+    values: null,
+    update: () => console.warn('Stream not initialized'),
+    reset: () => console.warn('Stream not initialized')
+  };
+  
+  try {
+    // Only call useStream if all required parameters are available
+    if (apiUrl && assistantId) {
+      // Configure options for the useStream hook
+      const streamOptions = {
+        apiUrl,
+        apiKey: apiKey ?? undefined,
+        assistantId: assistantId || 'report_content',
+        threadId: threadId ?? null,
+        // TypeScript doesn't recognize these properties, but they might be supported
+        // in future SDK versions or internally
+        options: {
+          forceSSE: true, // Force SSE mode instead of polling
+        },
+        onThreadId: (id: string) => {
+          console.log('🔍 DEBUG [Stream] ThreadId received from SDK:', id);
+          setThreadId(id);
+          sleep().then(() => getThreads().then(setThreads).catch(console.error));
+        },
+      };
+      
+      console.log('🔍 DEBUG [Stream] Initializing stream with options:', {
+        ...streamOptions,
+        apiKey: apiKey ? '[REDACTED]' : undefined // Don't log API key
+      });
+      
+      const hookResult = useStream(streamOptions);
+      
+      // Only use the result if it's valid
+      if (hookResult) {
+        streamValue = hookResult;
+        
+        // Set up custom message updater function
+        const messagesUpdater = (newMessages: any[]) => {
+          console.log('🔍 DEBUG [Stream] Manually updating messages from event:', {
+            messageCount: newMessages.length
+          });
+          
+          // Get current messages
+          const currentMessages = [...(streamValue.messages || [])];
+          
+          // Merge with new messages (avoiding duplicates by ID)
+          const messagesMap = new Map();
+          
+          // First add all current messages to the map
+          currentMessages.forEach(msg => {
+            if (msg && msg.id) {
+              messagesMap.set(msg.id, msg);
+            }
+          });
+          
+          // Then add/update with new messages
+          newMessages.forEach(msg => {
+            if (msg && msg.id) {
+              messagesMap.set(msg.id, msg);
+            }
+          });
+          
+          // Convert back to array
+          const mergedMessages = Array.from(messagesMap.values());
+          
+          // Update the messages using the SDK's update method
+          if (streamValue.update) {
+            streamValue.update({
+              messages: mergedMessages
+            });
+          }
+        };
+        
+        // Set up custom values updater function
+        const valuesUpdater = (newValues: any) => {
+          console.log('🔍 DEBUG [Stream] Manually updating values from event:', newValues);
+          
+          // Get current values
+          const currentValues = streamValue.values || {};
+          
+          // Merge with new values
+          const mergedValues = {
+            ...currentValues,
+            ...newValues,
+            // Special handling for ui_elements array to ensure proper merging
+            ...(newValues.ui_elements ? { 
+              ui_elements: newValues.ui_elements 
+            } : {})
+          };
+          
+          // Update the values using the SDK's update method
+          if (streamValue.update) {
+            streamValue.update({
+              values: mergedValues
+            });
+          }
+        };
+        
+        // Set up event listeners for manual updates from resumeWorkflow
+        useStreamMessagesEvent(messagesUpdater);
+        useUIElementsEvent(valuesUpdater);
+      }
+    } else {
+      console.warn('Missing required parameters for useStream:', { apiUrl, assistantId });
+    }
+  } catch (error) {
+    console.error('Error initializing stream:', error);
+  }
+
+  // Enhanced debug logging for stream values and messages
+  useEffect(() => {
+    console.log('🔍 DEBUG [Stream] Stream value updated:', {
+      isLoading: streamValue.isLoading,
+      error: streamValue.error,
+      hasValues: !!streamValue.values,
+      messageCount: streamValue.messages?.length || 0,
+    });
+    
+    if (streamValue.values?.ui_elements) {
+      console.log('🔍 DEBUG [Stream] UI elements in stream values:', 
+        streamValue.values.ui_elements);
+    }
+  }, [streamValue.isLoading, streamValue.error, streamValue.values, streamValue.messages]);
+
+  useEffect(() => {
+    if (streamValue && streamValue.messages) {
+      console.log('🔍 DEBUG [Stream] Stream messages updated:', {
+        messageCount: streamValue.messages.length,
+        lastMessage: streamValue.messages[streamValue.messages.length - 1]
+      });
+    }
+  }, [streamValue?.messages]);
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey).then((ok) => {

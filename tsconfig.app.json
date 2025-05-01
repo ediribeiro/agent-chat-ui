@@ -21,10 +21,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
+    "typeRoots": ["node_modules/@types"],
+    "types": ["jest", "node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "agent"]
+  "include": ["src", "agent"],
+  "exclude": ["src/lib/__tests__"]
 }

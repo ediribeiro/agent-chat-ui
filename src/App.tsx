@@ -2,7 +2,9 @@ import "./App.css";
 import { Thread } from "@/components/thread";
 
 function App() {
-  return <Thread />;
+  return (
+    <Thread />
+  );
 }
 
 export default App;

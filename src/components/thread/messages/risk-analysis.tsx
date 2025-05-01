@@ -13,6 +13,8 @@ import {
   cn,
 } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useStreamContext } from "@/providers/Stream";
 
 // Matches the expected fields in the summary
 interface RiskSummaryItem {
@@ -26,17 +28,47 @@ interface RiskSummaryItem {
 }
 
 interface RiskAnalysisProps {
-  analysis_data: RiskSummaryItem[]; // Changed prop name
+  analysis_data: RiskSummaryItem[];
+  threadId?: string | null;
+  assistantId?: string;
+  checkpoint?: any;
 }
 
-export default function RiskAnalysis({ analysis_data }: RiskAnalysisProps) { // Changed prop name in destructuring
-  if (!analysis_data || analysis_data.length === 0) {
-    return (
-      <div className="my-2 text-sm text-muted-foreground max-w-3xl mx-auto">
-        No risk analysis summary data available.
-      </div>
-    );
-  }
+export default function RiskAnalysis({ analysis_data, threadId, assistantId, checkpoint }: RiskAnalysisProps) {
+  const [displayData, setDisplayData] = useState<RiskSummaryItem[]>([]);
+  
+  // Get access to the stream context from the SDK
+  const stream = useStreamContext();
+  
+  // Debug logging
+  console.log('RiskAnalysis props:', { analysis_data, threadId, assistantId, checkpoint });
+
+  // Parse the risk data into a format suitable for display
+  useEffect(() => {
+    setDisplayData(analysis_data);
+  }, [analysis_data]);
+
+  // Monitor stream state for debugging
+  useEffect(() => {
+    const handleStreamUpdate = () => {
+      console.log('🔍 DEBUG [RiskAnalysis] Stream state updated:', {
+        isLoading: stream.isLoading,
+        hasValues: !!stream.values,
+        messageCount: stream.messages?.length || 0,
+      });
+    };
+    
+    // Set up simple interval to check stream state
+    let intervalId: number;
+    intervalId = window.setInterval(handleStreamUpdate, 2000);
+    
+    // Set up initial state logging
+    handleStreamUpdate();
+    
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [stream]);
 
   return (
     <div className="my-4 w-full max-w-3xl mx-auto">
@@ -44,6 +76,7 @@ export default function RiskAnalysis({ analysis_data }: RiskAnalysisProps) { // 
         <AlertTriangle className="w-4 h-4 text-orange-500" />
         Risk Analysis Summary
       </h3>
+      
       <div className="border rounded-lg overflow-hidden">
         <Table>
           <TableHeader>
@@ -57,11 +90,15 @@ export default function RiskAnalysis({ analysis_data }: RiskAnalysisProps) { // 
             </TableRow>
           </TableHeader>
           <TableBody>
-            {analysis_data.map((risk) => (
-              <TableRow key={risk.Id}>
-                <TableCell className="font-medium">{risk.Id}</TableCell>
-                <TableCell className="text-xs whitespace-normal break-words">{risk.Risco}</TableCell>
-                <TableCell className="text-xs whitespace-normal break-words text-center">{risk['Relacionado ao'] ?? "N/A"}</TableCell>
+            {displayData.map((risk) => (
+              <TableRow key={risk.Id} className={risk.Id.startsWith('TEMP_') ? 'bg-green-50' : ''}>
+                <TableCell className="font-medium">{risk.Id.startsWith('TEMP_') ? 'NEW' : risk.Id}</TableCell>
+                <TableCell className="text-xs whitespace-normal break-words">
+                  {risk.Risco}
+                </TableCell>
+                <TableCell className="text-xs whitespace-normal break-words text-center">
+                  {risk['Relacionado ao'] ?? "N/A"}
+                </TableCell>
                 <TableCell className="text-center text-xs">
                   {convertProbabilidade(risk.Probabilidade)}
                 </TableCell>
@@ -69,12 +106,7 @@ export default function RiskAnalysis({ analysis_data }: RiskAnalysisProps) { // 
                   {convertImpacto(risk["Impacto Geral"])}
                 </TableCell>
                 <TableCell className="text-center text-xs font-medium">
-                  <span
-                    className={cn(
-                      "px-2 py-0.5 rounded-full",
-                      getRiskColorClass(risk["Nível de Risco"])
-                    )}
-                  >
+                  <span className={cn("px-2 py-0.5 rounded-full", getRiskColorClass(risk["Nível de Risco"]))}>
                     {risk["Nível de Risco"]}
                   </span>
                 </TableCell>
@@ -85,4 +117,4 @@ export default function RiskAnalysis({ analysis_data }: RiskAnalysisProps) { // 
       </div>
     </div>
   );
-} 
+}

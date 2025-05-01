@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { cn, convertImpacto, convertProbabilidade, getRiskColorClass } from "@/lib/utils";
 import { FILE_UPLOAD_URL } from "@/lib/config";
+import { useState } from "react";
 
 // Updated interface based on protection_measures_list structure
 interface MeasureItem {
@@ -86,22 +87,15 @@ export default function ProtectionMeasuresTable({
   measures,
   threadId,
 }: ProtectionMeasuresProps) {
-  if (!measures || measures.length === 0) {
-    return (
-      <div className="my-2 text-sm text-muted-foreground max-w-4xl mx-auto">
-        No protection measures data available.
-      </div>
-    );
-  }
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = async () => {
     try {
+      setIsDownloading(true);
       const filename = threadId
         ? `risk_analysis_${threadId}.docx`
         : "risk_analysis.docx";
-      // Download endpoint using configured upload server and consistent param naming
       const downloadUrl = `${FILE_UPLOAD_URL}/api/download?thread_id=${threadId || ''}`;
-
       const response = await fetch(downloadUrl);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -117,19 +111,29 @@ export default function ProtectionMeasuresTable({
     } catch (error) {
       console.error("Download failed:", error);
       alert("Failed to download the report. Ensure the backend download endpoint is running.");
+    } finally {
+      setIsDownloading(false);
     }
   };
+
+  if (!measures || measures.length === 0) {
+    return (
+      <div className="my-2 text-sm text-muted-foreground max-w-4xl mx-auto">
+        No protection measures data available.
+      </div>
+    );
+  }
 
   return (
     <div className="my-4 w-full max-w-4xl mx-auto space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold">Detalhes do Risco e Medidas de Proteção</h3>
-        <Button onClick={handleDownload} variant="outline" size="sm">
+        <Button onClick={handleDownload} variant="outline" size="sm" disabled={isDownloading}>
           <Download className="w-4 h-4 mr-2" />
-          Download Word (.docx)
+          {isDownloading ? "Downloading..." : "Download Word (.docx)"}
         </Button>
       </div>
-
+      
       {measures.map((risk) => (
         <Card key={risk.Id} className="overflow-hidden">
           <CardHeader
@@ -155,7 +159,6 @@ export default function ProtectionMeasuresTable({
                 <p><strong>Probabilidade:</strong> {convertProbabilidade(risk.Probabilidade)}</p>
                 <p><strong>Impacto:</strong> {convertImpacto(risk["Impacto Geral"])}</p>
             </div>
-
             {risk.Consequências && risk.Consequências.length > 0 && (
               <div className="mb-3">
                 <h5 className="text-sm font-semibold mb-1"><strong>Danos:</strong></h5>
@@ -166,13 +169,11 @@ export default function ProtectionMeasuresTable({
                 </ul>
               </div>
             )}
-
             {risk["Análise de Apetite e Tolerância"] && (
                 <div className="mb-3 p-2 pl-0 bg-muted/40 rounded-md text-sm">
                     <p><strong>Necessidade de Tratamento:</strong> {risk["Análise de Apetite e Tolerância"]["Classificação da Necessidade de Tratamento"]}</p>
                 </div>
             )}
-
             <ActionsTable
               title="Ações Preventivas"
               actions={risk["Ações Preventivas"]}
@@ -186,4 +187,4 @@ export default function ProtectionMeasuresTable({
       ))}
     </div>
   );
-} 
+}
