@@ -180,7 +180,7 @@ An element in the `risk_data` array returned by workflow or stored in state.
   "Relacionado ao": "Context/category.",
   "Fonte": "Source text.",
   "Causas": ["List", "of", "strings"],
-  "Consequências": ["List", "of", "strings"],
+  "Consequencias": ["List", "of", "strings"],
   "Probabilidade": 3,
   "Impacto Financeiro": 2,
   "Impacto no Cronograma": 4,
@@ -208,7 +208,7 @@ Use similar fields plus:
     "Deficiência na qualificação dos instrutores",
     "Não realização de avaliação da eficácia do treinamento"
   ],
-  "Consequências": [
+  "Consequencias": [
     "Profissionais despreparados para aplicar e corrigir o Revalida.",
     "Falhas na aplicação e correção do exame, comprometendo a sua validade.",
     "Necessidade de investir em treinamento adicional para os profissionais.",

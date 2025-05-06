@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -11,14 +11,11 @@ import { HumanMessage } from "./messages/human";
 import {
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
-import { LangGraphLogoSVG } from "../icons/langgraph";
-import { TooltipIconButton } from "./tooltip-icon-button";
 import {
   ArrowDown,
   LoaderCircle,
   PanelRightOpen,
   PanelRightClose,
-  SquarePen,
   TerminalSquare,
   ArrowUp,
 } from "lucide-react";
@@ -32,120 +29,17 @@ import { Switch } from "../ui/switch";
 import { FileUpload } from "@/components/FileUpload";
 import LogStream from "@/components/LogStream";
 import { Textarea } from "@/components/ui/textarea";
-
-// Re-import custom UI components needed for StateDrivenUIComponents
-import InputFile from "./messages/input-file";
-import RiskAnalysis from "./messages/risk-analysis";
-import ProtectionMeasuresTable from "./messages/protection-measures-table";
-
-// Re-define registry needed for StateDrivenUIComponents
-const componentRegistry: Record<string, any> = {
-  "input-file.tsx": InputFile,
-  "risk-analysis.tsx": RiskAnalysis,
-  "protection-measures-table.tsx": ProtectionMeasuresTable,
-};
-
-// Define StateDrivenUIComponents here as it was removed from ai.tsx
-function StateDrivenUIComponents({
-  thread,
-  interruptAssistantId,
-  interruptCheckpoint,
-}: {
-  thread: ReturnType<typeof useStreamContext>;
-  interruptAssistantId: string | undefined;
-  interruptCheckpoint: any;
-}) {
-  const { values } = thread;
-  const [threadId] = useQueryState("threadId");
-  
-  // Debug logging for interrupt state
-  console.log('StateDrivenUIComponents:', { 
-    hasValues: !!values,
-    hasUIElements: !!(values?.ui_elements),
-    interruptCheckpoint,
-    interruptAssistantId
-  });
-  
-  // First check ui_elements in stream values
-  let uiElementsToRender = values?.ui_elements;
-  
-  // If not found, check in the interrupt checkpoint for the new backend-driven approach
-  if ((!uiElementsToRender || uiElementsToRender.length === 0) && 
-      interruptCheckpoint && 
-      interruptCheckpoint.ui_elements && 
-      Array.isArray(interruptCheckpoint.ui_elements)) {
-    uiElementsToRender = interruptCheckpoint.ui_elements;
-    console.log('Using UI elements from interruptCheckpoint:', uiElementsToRender);
-  }
-
-  // When we have UI elements but no interrupt checkpoint data,
-  // this probably means we're in an interrupt state with backend-driven UI elements
-  // Let's construct a synthetic interrupt context to ensure editing works
-  const inInterruptState = Boolean(values?.ui_elements && !interruptCheckpoint);
-  if (inInterruptState && !interruptCheckpoint && values?.ui_elements) {
-    // Create a more comprehensive synthetic checkpoint to pass along
-    // Include all fields we know the backend expects
-    
-    // First check if any of the UI elements are risk analysis components
-    const riskAnalysisElement = values?.ui_elements?.find(
-      (el: any) => el.type === 'risk_analysis' && Array.isArray(el.props?.analysis_data)
-    );
-    
-    const riskData = riskAnalysisElement?.props?.analysis_data || [];
-    const tableId = riskData.length > 0 ? 'risk_table' : 'protection_table';
-    
-    interruptCheckpoint = { 
-      ui_elements: values.ui_elements,
-      thread_id: threadId || '',
-      // IMPORTANT: We're using an empty string for run_id as a signal that it should be
-      // filled in by resumeWorkflow when it gets the actual run_id from the server response
-      run_id: '',
-      node_id: 'analyze_hazards', // Default to analyze_hazards since we're in risk analysis
-      node_type: 'agent',
-      status: 'paused',
-      graph_state: {
-        risk_data: riskData,
-        current_node: 'analyze_hazards',
-      },
-      config: {
-        assistant_id: 'report_content',
-        table_id: tableId
-      }
-    };
-    interruptAssistantId = 'report_content'; // Set the correct assistant ID
-    console.log('Created enhanced synthetic interrupt context:', interruptCheckpoint);
-  }
-
-  if (!uiElementsToRender || uiElementsToRender.length === 0) {
-    console.log('No UI elements to render');
-    return null;
-  }
-
-  return (
-    <div className="mb-4">
-      {uiElementsToRender.map((uiElement) => {
-        const ComponentToRender = componentRegistry[uiElement.component];
-        if (!ComponentToRender) {
-          console.error(`Component not found in registry: ${uiElement.component}`);
-          return (
-            <div key={uiElement.id} className="text-red-500 p-2 border border-red-500 rounded">
-              Error: Component "{uiElement.component}" not found.
-            </div>
-          );
-        }
-        return (
-          <ComponentToRender
-            key={uiElement.id}
-            {...uiElement.props}
-            threadId={threadId}
-            assistantId={interruptAssistantId}
-            checkpoint={interruptCheckpoint}
-          />
-        );
-      })}
-    </div>
-  );
-}
+import InformationExtraction from "./messages/InformationExtraction";
+import StepWizard from "@/components/StepWizard";
+import ReportRefinementTable from "./messages/ReportRefinementTable";
+import PreventiveContingencyActions from "./messages/PreventiveContingencyActions";
+import RiskSummaryPanel from "./messages/RiskSummaryPanel";
+import RiskMatrixView from "./messages/RiskMatrixView";
+import HazardIdentification from "./messages/HazardIdentification";
+import DocumentIngestion from "./messages/DocumentIngestion";
+import RiskAnalysis from "./messages/RiskAnalysis";
+import ProtectionMeasuresTable from "./messages/ProtectionMeasuresTable";
+import BowTieView from "./messages/BowTieView";
 
 function ScrollToBottom(props: { className?: string }) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
@@ -197,25 +91,17 @@ export function Thread() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const [useMockLogs, setUseMockLogs] = useState(false);
 
+  // Hide message form for this agent (default: true for others, false for this agent)
+  const shouldShowMessageForm = false; // Set to true for other assistants as needed
+
   const stream = useStreamContext();
   const streamValues = stream.values;
   const streamedMessages = stream.messages; // Source stream for updates
   const isLoading = stream.isLoading;
 
-  // Interrupt/Resume State LIFTED HERE
-  const [interruptAssistantId, setInterruptAssistantId] = useState<string | undefined>(undefined);
-  const [interruptCheckpoint, setInterruptCheckpoint] = useState<any>(undefined);
 
-  useEffect(() => {
-    if (!streamValues) return;
-    if (streamValues.checkpoint && streamValues.assistant_id) {
-      setInterruptAssistantId(streamValues.assistant_id);
-      setInterruptCheckpoint(streamValues.checkpoint);
-    } else {
-      setInterruptAssistantId(undefined);
-      setInterruptCheckpoint(undefined);
-    }
-  }, [streamValues?.checkpoint, streamValues?.assistant_id]);
+
+
 
   useEffect(() => {
     if (stream.values && Object.keys(stream.values).length > 0) {
@@ -342,7 +228,64 @@ export function Thread() {
     });
   };
 
-  // Update chatStarted to check our local displayMessages length
+  // Step detection and data extraction from streamValues
+  let completedSteps = 0;
+  // Step 1: Information Extraction (Briefing, Declarations, Context)
+  const hasInfoExtraction = !!(streamValues.briefing || streamValues.declarations || streamValues.context_analysis);
+  if (hasInfoExtraction) completedSteps = 2;
+  // Step 2: Initial Report (risk_data)
+  const hasInitialReport = Array.isArray(streamValues.risk_data) && streamValues.risk_data.length > 0;
+  if (hasInitialReport) completedSteps = 3;
+  // Step 3: Report Refinement (reuses risk_data)
+  const hasReportRefinement = hasInitialReport; // For now, same as initial report
+  if (hasReportRefinement) completedSteps = 4;
+  // Step 4: Cause Analysis (risk_data with Causas)
+  const hasCauseAnalysis = hasInitialReport && streamValues.risk_data.some((r:any) => r.Causas && r.Causas.length > 0);
+  if (hasCauseAnalysis) completedSteps = 5;
+  // Step 5: Consequence Analysis (risk_data with Consequencias)
+  const hasConsequenceAnalysis = hasInitialReport && streamValues.risk_data.some((r:any) => r.Consequencias && r.Consequencias.length > 0);
+  if (hasConsequenceAnalysis) completedSteps = 6;
+  // Step 6: Risk Evaluation (risk_data with all required keys)
+  const hasRiskEvaluation = hasInitialReport && streamValues.risk_data.some((r:any) => r["Nível de Risco"]);
+  let riskEvaluationData: any[] = [];
+  if (hasRiskEvaluation) {
+    riskEvaluationData = streamValues.risk_data.filter((r:any) => r["Nível de Risco"]);
+    completedSteps = 7;
+  }
+  // Step 7: Risk Matrix (visual)
+  const hasRiskMatrix = hasRiskEvaluation && riskEvaluationData.length > 0;
+  if (hasRiskMatrix) completedSteps = 7;
+  // Step 8: Hazard Identification (risk_data with all required keys)
+  const hasHazardIdentification = hasRiskMatrix && riskEvaluationData.length > 0;
+  if (hasHazardIdentification) completedSteps = 8;
+  // Step 9: Preventive Contingency Actions (risk_data with all required keys)
+  const hasPreventiveContingencyActions = hasHazardIdentification && riskEvaluationData.length > 0;
+  if (hasPreventiveContingencyActions) completedSteps = 9;
+
+  // Step navigation state (persisted in localStorage)
+  const [stepIndex, setStepIndex] = useState(() => {
+    const stored = localStorage.getItem("wizardStepIndex");
+    return stored ? parseInt(stored, 10) : (completedSteps > 0 ? completedSteps : 0);
+  });
+  useEffect(() => {
+    localStorage.setItem("wizardStepIndex", String(stepIndex));
+  }, [stepIndex]);
+  useEffect(() => {
+    // On new data, auto-advance to next step if in production mode and step completed
+    if (stepIndex < completedSteps) setStepIndex(completedSteps);
+  }, [completedSteps]);
+
+  // Prepare Information Extraction cards data
+  const infoExtractionCards = [
+    { label: "Briefing", content: streamValues.briefing },
+    { label: "Declarations", content: streamValues.declarations },
+    { label: "Context", content: streamValues.context_analysis }
+  ].filter(card => card.content);
+
+  // Prepare Report Refinement table data (same as risk_data for now)
+  const reportRefinementData = hasReportRefinement ? streamValues.risk_data : [];
+
+  // Define variables I accidentally removed
   const chatStarted = !!threadId || displayMessages.length > 0 || (streamValues?.ui_elements && streamValues.ui_elements.length > 0);
 
   const mainContentMarginLeft = chatHistoryOpen ? (isLargeScreen ? 300 : 0) : 0;
@@ -351,6 +294,95 @@ export function Thread() {
       ? "calc(100% - 300px)"
       : "100%"
     : "100%";
+
+  const handleFileUploadStart = () => {
+    setStepIndex(1); // Move to Document Ingestion
+  };
+
+  // --- Prepare datasets for HazardIdentification and PreventiveContingencyActions ---
+  const hazardIdentificationData = hasRiskMatrix && riskEvaluationData.length > 0
+    ? riskEvaluationData.filter((r: any) => r["Análise de Apetite e Tolerância"]) : [];
+  const preventiveContingencyData = hasHazardIdentification && riskEvaluationData.length > 0
+    ? riskEvaluationData.filter((r: any) => r["Ações de Contingências"] || r["Ações Preventivas"]) : [];
+
+  // --- Add a key to force StepWizard reset on new run ---
+  const [wizardResetKey, setWizardResetKey] = useState(0);
+
+  // --- Update New Run button handler to also reset StepWizard ---
+  const handleNewRun = () => {
+    setThreadId(null);
+    setDisplayMessages([]);
+    setStepIndex(0);
+    setWizardResetKey(prev => prev + 1); // Force StepWizard reset
+    setWorkflowCompleted(false); // Reset completion status
+    localStorage.setItem("wizardStepIndex", "0");
+    localStorage.setItem("workflowCompleted", "false");
+  };
+
+  // --- Auto-advance to step 10 when run is done ---
+  useEffect(() => {
+    // When workflow finishes with data, auto-advance to summary and allow navigation
+    // Only auto-advance if the step hasn't been manually changed
+    const autoAdvanceCondition = 
+      !stream.isLoading && 
+      threadId && 
+      stepIndex < 10 && 
+      streamValues && 
+      streamValues.risk_data && 
+      Array.isArray(streamValues.risk_data) && 
+      streamValues.risk_data.length > 0;
+    
+    if (autoAdvanceCondition) {
+      console.log('Auto-advancing to step 10');
+      setStepIndex(10);
+      // Update localStorage to match
+      localStorage.setItem("wizardStepIndex", "10");
+    }
+  }, [stream.isLoading]); // Only trigger on loading state changes, not stepIndex changes
+
+  // Track when a workflow completes - make sure it persists
+  const [workflowCompleted, setWorkflowCompleted] = useState(() => {
+    // Initialize from localStorage if available
+    const stored = localStorage.getItem("workflowCompleted");
+    return stored === "true";
+  });
+  
+  // When a workflow finishes with valid data, mark it as completed
+  useEffect(() => {
+    const isComplete = !!(
+      threadId && 
+      streamValues && 
+      streamValues.risk_data && 
+      Array.isArray(streamValues.risk_data) && 
+      streamValues.risk_data.length > 0 && 
+      !stream.isLoading
+    );
+      
+    if (isComplete !== workflowCompleted) {
+      console.log('Setting workflow completed:', isComplete);
+      setWorkflowCompleted(isComplete);
+      localStorage.setItem("workflowCompleted", String(isComplete));
+    }
+  }, [threadId, streamValues, stream.isLoading, workflowCompleted]);
+
+  // Custom step change handler to prevent unwanted resets
+  const handleStepChange = (newStep: number) => {
+    console.log('Manual step change to:', newStep);
+    setStepIndex(newStep);
+    localStorage.setItem("wizardStepIndex", newStep.toString());
+  };
+
+  // --- Prepare combined data for BowTie view (merged steps 5-6) ---
+  const bowTieData = useMemo(() => {
+    // Combine cause and consequence data
+    if (Array.isArray(streamValues?.risk_data)) {
+      return streamValues.risk_data
+        .filter((risk: any) => 
+          risk && (Array.isArray(risk.Causas) || Array.isArray(risk.Consequencias))
+        );
+    }
+    return [];
+  }, [streamValues?.risk_data]);
 
   return (
     <div className="flex w-full h-screen overflow-hidden">
@@ -390,7 +422,7 @@ export function Thread() {
       >
         <div
           className={cn(
-            "flex items-center justify-between p-2 border-b bg-background z-20",
+            "flex items-center justify-between p-2 border-b bg-background z-10",
             !chatStarted && "absolute top-0 left-0 right-0",
             chatStarted && "relative",
           )}
@@ -410,54 +442,80 @@ export function Thread() {
             )}
             {chatStarted && (
               <button
-                className="flex gap-2 items-center cursor-pointer"
-                onClick={() => setThreadId(null)}
+                className="flex gap-2 items-center cursor-pointer bg-blue-600 text-white px-2 py-1 rounded-md"
+                onClick={handleNewRun}
               >
-                <LangGraphLogoSVG width={32} height={32} />
-                <span className="text-xl font-semibold tracking-tight">
-                  Agent Chat
-                </span>
+                New Run
               </button>
             )}
           </div>
 
-          {chatStarted && (
-            <TooltipIconButton
-              tooltip="New thread"
-              variant="ghost"
-              onClick={() => setThreadId(null)}
+          {/* Interrupt Workflow Button */}
+          <div className="flex items-center gap-2 cursor-pointer">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={!stream.isLoading}
+              onClick={() => stream.stop()}
             >
-              <SquarePen className="size-5" />
-            </TooltipIconButton>
-          )}
+              {stream.isLoading && (
+                <LoaderCircle className="w-4 h-4 mr-1 animate-spin" />
+              )}
+              Interrupt Workflow
+            </Button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto relative">
           <StickToBottom>
-            <div className="p-4 space-y-0">
+            <div className={`p-4 space-y-0 ${!stream.isLoading && !threadId && displayMessages.length === 0 && (!streamValues?.ui_elements || streamValues.ui_elements.length === 0) ? 'mt-15' : 'mt-0'}`}>
+              {/* Step Wizard always at top */}
+              <StepWizard
+                currentStep={stepIndex}
+                completedSteps={workflowCompleted ? 10 : completedSteps}
+                onStepChange={handleStepChange} // Use the custom handler
+                resetKey={wizardResetKey}
+              />
+
+              {/* Render current step content */}
+              {stepIndex === 0 && (
+                <FileUpload onUploadStart={handleFileUploadStart} />
+              )}
+              {stepIndex === 1 && (
+                <DocumentIngestion inputFile={streamValues?.input_file} />
+              )}
+              {stepIndex === 2 && infoExtractionCards.length > 0 && (
+                <InformationExtraction cards={infoExtractionCards} />
+              )}
+              {stepIndex === 3 && reportRefinementData.length > 0 && (
+                <ReportRefinementTable data={reportRefinementData} />
+              )}
+              {stepIndex === 4 && bowTieData.length > 0 && (
+                <BowTieView data={bowTieData} />
+              )}
+              {/* Fix step 7 to remove duplicate RiskEvaluation */}
+              {stepIndex === 5 && riskEvaluationData.length > 0 && (
+                <RiskMatrixView data={riskEvaluationData} />
+              )}
+              {stepIndex === 6 && hazardIdentificationData.length > 0 && (
+                <HazardIdentification risk_data={hazardIdentificationData} />
+              )}
+              {stepIndex === 7 && preventiveContingencyData.length > 0 && (
+                <PreventiveContingencyActions risk_data={preventiveContingencyData} />
+              )}
+              {stepIndex === 8 && (
+                <>
+                  <RiskSummaryPanel values={streamValues} threadId={streamValues?.thread_id || threadId || undefined} />
+                  <RiskAnalysis values={streamValues} />
+                  <ProtectionMeasuresTable values={streamValues} />
+                </>
+              )}
+
+              {/* Existing thread/chat UI below (show rest of messages, etc.) */}
               {!chatStarted ? (
-                <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
-                  <div className="max-w-md w-full text-center">
-                    <h2 className="text-2xl font-semibold mb-2">
-                      Risk Analysis Chatbot
-                    </h2>
-                    <p className="text-muted-foreground mb-6">
-                      Upload a PDF document to start the risk analysis process
-                    </p>
-                    <FileUpload />
-                    <div className="mt-12">
-                      <LangGraphLogoSVG className="flex-shrink-0 h-8 mx-auto mb-2" />
-                      <h1 className="text-2xl font-semibold tracking-tight">
-                        Agent Chat
-                      </h1>
-                    </div>
-                  </div>
-                </div>
+                <div>{/* Empty div to avoid duplicate FileUpload - it's already shown above when stepIndex === 0 */}</div>
               ) : (
                 <>
-                  {/* Render StateDrivenUIComponents FIRST */}
-                  <StateDrivenUIComponents thread={stream} interruptAssistantId={interruptAssistantId} interruptCheckpoint={interruptCheckpoint} />
-
                   {/* Then render the message history */}
                   {displayMessages.map((message, index) => {
                       if (message.type === "human") {
@@ -521,7 +579,7 @@ export function Thread() {
           </StickToBottom>
         </div>
 
-        {chatStarted && (
+        {chatStarted && shouldShowMessageForm && (
           <div className="p-4 border-t bg-background z-10">
              <div className="max-w-3xl mx-auto">
               <form

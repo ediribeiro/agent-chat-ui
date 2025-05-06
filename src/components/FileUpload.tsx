@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Upload, FileIcon, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Upload, FileIcon, AlertCircle, LoaderCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { useStreamContext } from '@/providers/Stream';
 import { FILE_UPLOAD_URL, LOGS_SERVER_URL } from '@/lib/config';
@@ -11,7 +11,14 @@ const UPLOAD_URL = FILE_UPLOAD_URL + '/upload';
 const HEALTH_CHECK_URL = LOGS_SERVER_URL + '/health';
 // Note: LangGraph API remains on port 8123, handled by StreamProvider
 
-export const FileUpload = () => {
+// Export a flag or context to indicate FileUpload phase for StepWizard
+export const FILE_UPLOAD_PHASE = true;
+
+interface FileUploadProps {
+  onUploadStart?: () => void;
+}
+
+export const FileUpload = ({ onUploadStart }: FileUploadProps) => {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -145,6 +152,8 @@ export const FileUpload = () => {
       };
       console.log('Submitting to LangGraph with input_file and empty messages:', langGraphInput);
 
+      if (onUploadStart) onUploadStart();
+
       stream.submit(
         langGraphInput, 
         {
@@ -190,7 +199,7 @@ export const FileUpload = () => {
             <FileIcon className="h-10 w-10 text-blue-500" />
             <p className="text-sm font-medium">{file.name}</p>
             <p className="text-xs text-gray-500">
-              {(file.size / 1024 / 1024).toFixed(2)} MB
+              PDF &middot; {(file.size / 1024 / 1024).toFixed(2)} MB
             </p>
           </div>
         ) : (
@@ -221,8 +230,11 @@ export const FileUpload = () => {
               uploadFile();
             }}
             disabled={isUploading}
-            className="w-full sm:w-auto"
+            className="w-full sm:w-auto flex items-center justify-center"
           >
+            {isUploading && (
+              <LoaderCircle className="animate-spin mr-2 h-4 w-4" />
+            )}
             {isUploading ? 'Uploading...' : 'Upload and Analyze'}
           </Button>
         </div>

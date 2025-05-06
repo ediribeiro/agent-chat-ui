@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import ProtectionMeasuresTable from '../protection-measures-table';
+import ProtectionMeasuresTable from '../ProtectionMeasuresTable';
 // Mock config to avoid import.meta.env errors
 jest.mock('@/lib/config', () => ({ FILE_UPLOAD_URL: 'http://localhost:8123' }));
 
